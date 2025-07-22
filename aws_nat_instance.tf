@@ -62,8 +62,6 @@ locals {
 
 }
 
-
-
 resource "aws_security_group" "natinstance_sg" {
   for_each = try(var.vpc_config["nat_instance"]["create"], false) == true ? { "sg_natinstance" : try(aws_vpc.vpc["vpc"], var.vpc_config["vpc"]) } : {}
 
@@ -231,7 +229,6 @@ resource "aws_eip" "natinstance_eip" {
     )
   ) : toset([]) : toset([])
 
-  vpc               = true
   network_interface = aws_network_interface.natinstance_eni[each.key].id
   tags = merge(
     tomap(
