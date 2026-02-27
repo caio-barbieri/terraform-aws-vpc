@@ -118,8 +118,8 @@ test/CL037-SEC/us-east-1/
 ```bash
 cd test/CL037-SEC/us-east-1
 terraform init
-terraform plan
-terraform apply
+terraform plan -out=tfplan
+terraform apply tfplan
 ```
 
 ## Como Reproduzir

@@ -42,3 +42,6 @@ override.tf.json
 
 # MacOS 
 *.DS_Store
+
+# Terraform plan
+tfplan

@@ -68,12 +68,15 @@ variable "vpc_config" {
       nat_instance = optional(
         object(
           {
-            ami_id         = optional(string)              #  ID of NatInstance Image imported by `import_natinstance_ami.sh` or console 
-            create         = optional(bool, false)         # If 'true', will create a new NAT instance
-            az_widerange   = optional(string, 2)           # The wider range of Availability Zones to use for the NAT instance
-            az_ids         = optional(set(string))         # List of Availability Zone IDs to use for the NAT instance
-            exclude_az_ids = optional(set(string))         # List of Availability Zone IDs to exclude from use for the NAT instance
-            instance_type  = optional(string, "t3.medium") # The instance type of the NAT instance
+            ami_id                = optional(string)              #  ID of NatInstance Image imported by `docs/nat-instance-ami-setup.md` or console 
+            create                = optional(bool, false)         # If 'true', will create a new NAT instance
+            az_widerange          = optional(string, 2)           # The wider range of Availability Zones to use for the NAT instance
+            az_ids                = optional(set(string))         # List of Availability Zone IDs to use for the NAT instance
+            exclude_az_ids        = optional(set(string))         # List of Availability Zone IDs to exclude from use for the NAT instance
+            instance_type         = optional(string, "t3.medium") # The instance type of the NAT instance
+            key_name              = optional(string)              # EC2 key pair name for SSH access
+            iam_instance_profile  = optional(string)              # IAM instance profile name
+            instance_tags         = optional(map(string))         # Additional tags for NAT instances
           }
         ),
         {

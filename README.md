@@ -225,9 +225,11 @@ terraform-aws-vpc/
 ├── aws_peering.tf               # VPC Peering
 ├── aws_transit_gateway.tf       # Transit Gateway
 ├── aws_vpc_endpoint.tf          # VPC Endpoints
-├── import_natinstance_ami.sh    # Script para importar AMI NAT
+├── docs/                        # Documentação
+│   └── nat-instance-ami-setup.md # Guia de criação da AMI NAT
 └── test/                        # Exemplos de uso
     ├── exemplo-multiregiao/     # Exemplo multi-região
+    ├── nat-instance/            # Exemplo NAT Instance
     ├── simple_vpc/              # VPC simples
     ├── security_group/          # Com security groups
     └── transit_gateway/         # Com transit gateway
@@ -336,44 +338,47 @@ module "vpc" {
 }
 ```
 
-## NAT Instance - Problema e Solução
+## NAT Instance - Configuração e Uso
 
-### ⚠️ Problema Identificado
+### ⚠️ Problema com AMIs Oficiais
 
-No final de 2024, foi observado que o projeto parou de funcionar porque a **AMI da NAT Instance foi removida de todas as regiões AWS, exceto Irlanda (eu-west-1)**.
+A AWS **descontinuou as AMIs oficiais de NAT Instance**. A solução é criar uma AMI customizada baseada no Amazon Linux 2023.
 
-### ✅ Solução
+### ✅ Solução Atual
 
-Um script chamado `import_natinstance_ami.sh` foi criado para automatizar a importação da AMI para outras regiões.
+Este módulo requer que você crie uma **AMI customizada** para NAT Instance seguindo o guia detalhado em [`docs/nat-instance-ami-setup.md`](docs/nat-instance-ami-setup.md).
 
-**Como usar**:
+**Resumo do processo:**
 
-```bash
-# Tornar o script executável
-chmod +x import_natinstance_ami.sh
+1. **Criar IAM Instance Profile** para acesso SSM
+2. **Lançar instância base** com Amazon Linux 2023
+3. **Configurar NAT**:
+   - Habilitar IP forwarding
+   - Instalar e configurar iptables
+   - Configurar MASQUERADE (detectando interface automaticamente)
+4. **Criar AMI** a partir da instância configurada
+5. **Usar a AMI** no módulo Terraform
 
-# Executar o script
-./import_natinstance_ami.sh
-```
+**Exemplo completo disponível em:** [`test/nat-instance/`](test/nat-instance/)
 
-O script irá:
-1. Copiar a AMI da região eu-west-1
-2. Importar para a região desejada
-3. Retornar o ID da nova AMI
-
-**Uso no Terraform**:
+### Uso no Terraform
 
 ```hcl
 nat_instance = {
-  create    = true
-  ami_id    = "ami-xxxxxxxxx"  # ID retornado pelo script
-  az_widerange = 2
+  create               = true
+  ami_id               = "ami-xxxxxxxxx"  # Sua AMI customizada
+  key_name             = "my-key"
+  iam_instance_profile = "EC2-SSM-Profile"
+  az_widerange         = 1  # Número de NAT instances
+  instance_tags = {
+    "Name" = "nat-instance-production"
+  }
 }
 ```
 
 ### Alternativa: NAT Gateway
 
-Se você não precisa de NAT Instance especificamente, considere usar NAT Gateway:
+Se você não precisa de controle granular, considere usar NAT Gateway:
 
 **Vantagens do NAT Gateway**:
 - Gerenciado pela AWS
