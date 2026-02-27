@@ -36,3 +36,9 @@ override.tf.json
 
 *.swp
 **/*.swp
+
+# Client reports
+**/client-reports/
+
+# MacOS 
+*.DS_Store
