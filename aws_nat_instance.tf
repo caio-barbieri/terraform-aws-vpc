@@ -231,7 +231,7 @@ resource "aws_eip" "natinstance_eip" {
     )
   ) : toset([]) : toset([])
 
-  domain            = "vpc"
+  vpc               = true
   network_interface = aws_network_interface.natinstance_eni[each.key].id
   tags = merge(
     tomap(

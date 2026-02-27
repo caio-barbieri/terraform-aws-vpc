@@ -116,7 +116,7 @@ resource "aws_eip" "natgw_eip" {
     )
   ) : toset([]) : toset([])
 
-  domain = "vpc"
+  vpc = true
   tags = merge(
     tomap(
       {
