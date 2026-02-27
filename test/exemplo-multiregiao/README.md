@@ -291,6 +291,14 @@ Verifique se os profiles estão configurados corretamente:
 aws sts get-caller-identity --profile CL037-SEC
 ```
 
+## Atualizações
+
+Este é um exemplo básico de implementação do módulo. A versão completa e atualizada deste projeto está disponível no repositório oficial do cliente:
+
+- **GitLab**: https://gitlab.dev.roadcard.com.br/infra/terraform-aws-vpc
+
+Novas funcionalidades e melhorias são publicadas no repositório oficial.
+
 ## Backend Terraform
 
 O estado do Terraform é armazenado no bucket S3:

@@ -39,6 +39,8 @@ Resultado → VPC completa com todos os componentes
 
 Para ilustrar como o módulo funciona, vamos usar um exemplo real de implementação multi-região para uma conta de segurança.
 
+> **Nota**: Este exemplo é uma implementação básica do projeto que foi desenvolvido para um cliente real. A versão completa e atualizada deste projeto está disponível no repositório oficial do cliente em: https://gitlab.dev.roadcard.com.br/infra/terraform-aws-vpc
+
 ### Cenário: VPC Multi-Região para Segurança
 
 **Objetivo**: Criar VPCs em duas regiões AWS (us-east-1 e sa-east-1) para hospedar um SIEM baseado em OpenSearch, com acesso via VPN Client.
