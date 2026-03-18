@@ -1,5 +1,5 @@
 module "vpc" {
-  source = "../../.."
+  source = "../.."
 
   vpc_config = {
     vpc = {
