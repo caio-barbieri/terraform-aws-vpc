@@ -8,6 +8,8 @@ Módulo Terraform reutilizável para criar uma VPC AWS com subnets distribuídas
 - AWS provider `>= 6.0.0`
 - Credenciais e região configuradas pelo módulo raiz
 
+Os testes mockados exigem Terraform `>= 1.7`; CI usa Terraform `1.15.8`. Essa exigência de desenvolvimento não altera o requisito de runtime do módulo.
+
 O módulo não configura provider nem backend. O módulo raiz consumidor continua responsável por autenticação, região, estado remoto e lock.
 
 ## Uso rápido
@@ -54,6 +56,15 @@ Quando `cidr_block` não é informado na camada, o módulo deriva subnets determ
 Em produção, substitua `ref=main` por uma tag ou SHA revisada. O repositório ainda não possui releases versionadas.
 
 Exemplos locais executáveis estão em [`examples/basic`](examples/basic) e [`examples/complete`](examples/complete).
+
+## Documentação
+
+- [Referência completa de `vpc_config`](docs/CONFIGURATION.md)
+- [Arquitetura e limites de responsabilidade](docs/ARCHITECTURE.md)
+- [Migração para v2](docs/MIGRATION-v2.md)
+- [Como contribuir](CONTRIBUTING.md)
+- [Política de segurança](SECURITY.md)
+- [Changelog](CHANGELOG.md)
 
 ## O que é criado por padrão
 
@@ -235,6 +246,7 @@ Todo o contrato entra em `vpc_config`:
 | Campo | Finalidade | Padrão |
 |---|---|---|
 | `vpc` | VPC nova por CIDR/IPAM ou referência a VPC existente | obrigatório |
+| `ipam` | Alias legado para `vpc.ipv4_ipam_pool_id` | `null` |
 | `global.tags` | Tags compartilhadas | `{}` |
 | `global.az` | Estado e Zone IDs excluídos | `{}` |
 | `flow_logs` | Entrega para CloudWatch Logs, S3 ou Firehose | desabilitado |
@@ -261,7 +273,7 @@ O Terraform valida combinações essenciais antes do plan, incluindo CIDR versus
 | `public_subnet_ids` | IDs de subnets públicas |
 | `private_subnet_ids` | IDs de subnets privadas |
 | `route_table_ids` | IDs de route tables por subnet |
-| `internet_gateway_id` | ID do Internet Gateway criado |
+| `internet_gateway_id` | ID do Internet Gateway criado ou informado |
 | `ipv6_cidr_block` | CIDR IPv6 associado à VPC |
 | `egress_only_internet_gateway_id` | ID do Egress-only Internet Gateway |
 | `nat_gateway_ids` | IDs de NAT Gateways por subnet pública |
@@ -281,6 +293,10 @@ terraform fmt -check -recursive
 terraform init -backend=false
 terraform validate
 terraform test -test-directory=testing
+
+tflint --init
+tflint --recursive --format compact
+trivy config --severity HIGH,CRITICAL --exit-code 1 .
 
 terraform -chdir=examples/basic init -backend=false
 terraform -chdir=examples/basic validate
@@ -310,5 +326,6 @@ O argumento removido `aws_eip.vpc` foi migrado para `domain = "vpc"`. Nenhum ren
 - Transit Gateway não cria RAM shares nem aceita attachments cross-account.
 - NAT Instance depende de AMI mantida pelo consumidor e não oferece failover automático de rotas entre AZs; para esse requisito, prefira NAT Gateway ou uma solução de appliance dedicada.
 - O repositório ainda não publica tags/releases, portanto consumidores externos não têm uma versão SemVer oficial para fixar.
+- O repositório ainda não declara uma licença de software; a escolha deve ser feita pelos mantenedores antes de promover reutilização externa.
 
 Esses itens devem ser tratados como evoluções separadas porque ampliam permissões, custo ou risco de recriação.
