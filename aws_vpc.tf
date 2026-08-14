@@ -9,8 +9,8 @@ resource "aws_vpc" "vpc" {
   enable_dns_support                   = each.value["enable_dns_support"]
   enable_network_address_usage_metrics = each.value["enable_network_address_usage_metrics"]
   instance_tenancy                     = each.value["instance_tenancy"]
-  ipv4_ipam_pool_id                    = each.value["ipv4_ipam_pool_id"]
-  ipv4_netmask_length                  = each.value["ipv4_ipam_pool_id"] != null ? var.vpc_config["vpc"]["ipv4_netmask_length"] : null
+  ipv4_ipam_pool_id                    = local.ipv4_ipam_pool_id
+  ipv4_netmask_length                  = local.ipv4_ipam_pool_id != null ? var.vpc_config["vpc"]["ipv4_netmask_length"] : null
   tags = merge(
     local.common_tags,
     var.vpc_config["vpc"]["tags"],

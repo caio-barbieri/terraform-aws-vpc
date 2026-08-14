@@ -12,6 +12,10 @@ locals {
   )
   default_dhcp_domain_name = data.aws_region.session.region == "us-east-1" ? "ec2.internal" : "${data.aws_region.session.region}.compute.internal"
   ipv6_enabled             = var.vpc_config.ipv6.enabled
+  ipv4_ipam_pool_id = try(coalesce(
+    var.vpc_config.vpc.ipv4_ipam_pool_id,
+    try(var.vpc_config.ipam.ipam_pool_id, null)
+  ), null)
   vpc_context = {
     id = try(
       aws_vpc.vpc["vpc"].id,

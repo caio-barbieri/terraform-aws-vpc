@@ -162,6 +162,7 @@ variable "vpc_config" {
                   }
                 )
               )
+              route_table_ids           = optional(set(string))     # Explicit route table IDs; alternative to route_tables_filter
               tags                      = optional(map(string), {}) # Tags for the VPC peering connection
               vpc_id                    = optional(string)          # The ID of the VPC initiating the peering connection
               vpc_peering_connection_id = optional(string)          # The ID of the VPC peering connection
@@ -437,11 +438,15 @@ variable "vpc_config" {
 
   validation {
     condition = var.vpc_config.vpc.create ? (
-      (var.vpc_config.vpc.cidr_block != null) != (var.vpc_config.vpc.ipv4_ipam_pool_id != null)
+      length(compact([
+        var.vpc_config.vpc.cidr_block,
+        var.vpc_config.vpc.ipv4_ipam_pool_id,
+        try(var.vpc_config.ipam.ipam_pool_id, null)
+      ])) == 1
       ) : (
       var.vpc_config.vpc.vpc_id != null
     )
-    error_message = "When vpc.create is true, configure exactly one of cidr_block or ipv4_ipam_pool_id. When false, configure vpc_id."
+    error_message = "When vpc.create is true, configure exactly one IPv4 source: vpc.cidr_block, vpc.ipv4_ipam_pool_id, or the legacy ipam.ipam_pool_id alias. When false, configure vpc_id."
   }
 
   validation {
@@ -469,10 +474,19 @@ variable "vpc_config" {
     condition = alltrue([
       for peering in var.vpc_config.peering_connection :
       ((peering.peer_vpc_id != null) != (peering.vpc_peering_connection_id != null)) &&
-      peering.route_tables_filter != null &&
+      ((peering.route_tables_filter != null) != (peering.route_table_ids != null)) &&
+      (peering.route_table_ids == null || length(peering.route_table_ids) > 0) &&
       length(coalesce(peering.cidr_blocks, [])) > 0
     ])
-    error_message = "Each peering connection must set exactly one of peer_vpc_id or vpc_peering_connection_id, plus route_tables_filter and at least one cidr_blocks entry."
+    error_message = "Each peering connection must set exactly one connection ID, exactly one of route_tables_filter or non-empty route_table_ids, and at least one cidr_blocks entry."
+  }
+
+  validation {
+    condition = alltrue([
+      for peering in var.vpc_config.peering_connection :
+      !var.vpc_config.vpc.create || peering.vpc_id != null || peering.route_table_ids != null || startswith(peering.route_tables_filter.name, "tag:")
+    ])
+    error_message = "Peering routes for a VPC created by this module require route_table_ids or a tag-based route_tables_filter."
   }
 
   validation {

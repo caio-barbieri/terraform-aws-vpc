@@ -3,7 +3,7 @@ resource "aws_vpc_ipv6_cidr_block_association" "ipv6" {
 
   vpc_id = aws_vpc.vpc["vpc"].id
 
-  assign_generated_ipv6_cidr_block = each.value.assign_generated_ipv6_cidr_block
+  assign_generated_ipv6_cidr_block = each.value.assign_generated_ipv6_cidr_block ? true : null
   ipv6_cidr_block                  = each.value.assign_generated_ipv6_cidr_block ? null : each.value.ipv6_cidr_block
   ipv6_ipam_pool_id                = each.value.assign_generated_ipv6_cidr_block ? null : each.value.ipv6_ipam_pool_id
   ipv6_netmask_length              = each.value.assign_generated_ipv6_cidr_block ? null : each.value.ipv6_netmask_length
