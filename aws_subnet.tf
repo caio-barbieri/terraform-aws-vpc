@@ -356,6 +356,8 @@ resource "aws_network_acl" "nacl" {
   }
 }
 
+# The layer NACL is deliberately neutral; workload restrictions belong in Security Groups or explicit network_acl_rules.
+# trivy:ignore:AWS-0102
 resource "aws_network_acl_rule" "default_ipv6_egress" {
   for_each = {
     for name, layer in zipmap(
@@ -373,6 +375,8 @@ resource "aws_network_acl_rule" "default_ipv6_egress" {
   ipv6_cidr_block = "::/0"
 }
 
+# The layer NACL is deliberately neutral; workload restrictions belong in Security Groups or explicit network_acl_rules.
+# trivy:ignore:AWS-0102
 resource "aws_network_acl_rule" "default_ipv6_ingress" {
   for_each = {
     for name, layer in zipmap(
