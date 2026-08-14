@@ -3,10 +3,10 @@
 #
 resource "aws_vpc_peering_connection" "peering_connection" {
 
-  for_each = var.vpc_config["peering_connection"] != null ? {
+  for_each = {
     for v in var.vpc_config["peering_connection"] :
     v["peer_vpc_id"] => v if v["peer_vpc_id"] != null
-  } : {}
+  }
 
   auto_accept = coalesce(
     each.value["peer_owner_id"],
@@ -22,7 +22,8 @@ resource "aws_vpc_peering_connection" "peering_connection" {
 
   vpc_id = coalesce(
     each.value["vpc_id"],
-    aws_vpc.vpc["vpc"].id
+    try(aws_vpc.vpc["vpc"].id, null),
+    var.vpc_config.vpc.vpc_id
   )
 
   peer_region = each.value["peer_region"]
@@ -42,21 +43,21 @@ resource "aws_vpc_peering_connection" "peering_connection" {
   }
 
   tags = merge(
+    local.common_tags,
     tomap(
       {
         "Name" = upper(
           format(
             "peer-connection-%s-to-%s",
-            aws_vpc.vpc["vpc"].id,
+            coalesce(each.value["vpc_id"], try(aws_vpc.vpc["vpc"].id, null), var.vpc_config.vpc.vpc_id),
             each.key
           )
         )
-        "opsteam:ParentObject"     = aws_vpc.vpc["vpc"].id
-        "opsteam:ParentObjectArn"  = aws_vpc.vpc["vpc"].arn
+        "opsteam:ParentObject"     = coalesce(each.value["vpc_id"], try(aws_vpc.vpc["vpc"].id, null), var.vpc_config.vpc.vpc_id)
+        "opsteam:ParentObjectArn"  = try(aws_vpc.vpc["vpc"].arn, null)
         "opsteam:ParentObjectType" = "VPC"
       }
-    ),
-    local.common_tags
+    )
   )
 
   timeouts {
@@ -70,10 +71,10 @@ resource "aws_vpc_peering_connection" "peering_connection" {
 
 resource "aws_vpc_peering_connection_accepter" "peering_accept" {
 
-  for_each = var.vpc_config["peering_connection"] != null ? {
+  for_each = {
     for v in var.vpc_config["peering_connection"] :
     v["vpc_peering_connection_id"] => v if v["vpc_peering_connection_id"] != null
-  } : {}
+  }
 
   accepter {
     allow_remote_vpc_dns_resolution = try(
@@ -91,13 +92,13 @@ resource "aws_vpc_peering_connection_accepter" "peering_accept" {
 #
 data "aws_route_tables" "rts_to_pwc" {
 
-  for_each = var.vpc_config["peering_connection"] != null ? {
+  for_each = {
     for v in var.vpc_config["peering_connection"] :
     coalesce(
       v["peer_vpc_id"],
       v["vpc_peering_connection_id"]
     ) => v if compact([v["peer_vpc_id"], v["vpc_peering_connection_id"]]) != []
-  } : {}
+  }
 
   vpc_id = try(
     aws_vpc.vpc["vpc"].id,
@@ -121,13 +122,13 @@ resource "aws_ec2_managed_prefix_list" "managed_prefixlist_peering_connection" {
   #      v["peer_vpc_id"] => v if v["peer_vpc_id"] != null
   #  } : {}
 
-  for_each = var.vpc_config["peering_connection"] != null ? {
+  for_each = {
     for v in var.vpc_config["peering_connection"] :
     coalesce(
       v["peer_vpc_id"],
       v["vpc_peering_connection_id"]
     ) => v if compact([v["peer_vpc_id"], v["vpc_peering_connection_id"]]) != []
-  } : {}
+  }
 
   name           = upper(format("prefixlist-vpcpeer-%s", each.key))
   address_family = "IPv4"
@@ -144,6 +145,7 @@ resource "aws_ec2_managed_prefix_list" "managed_prefixlist_peering_connection" {
 
 
   tags = merge(
+    local.common_tags,
     {
       "Name" = upper(format("prefixlist-internet-%s", each.key))
       "opsteam:ParentObject" = try(
@@ -151,8 +153,7 @@ resource "aws_ec2_managed_prefix_list" "managed_prefixlist_peering_connection" {
         each.key
       )
       "opsteam:ParentObjectType" = can(aws_vpc_peering_connection.peering_connection[each.key].id) ? "VPCPeeringConnection" : "VPCPeeringAccept"
-    },
-    local.common_tags
+    }
   )
 
 }

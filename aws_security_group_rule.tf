@@ -6,7 +6,7 @@ resource "aws_security_group_rule" "ingress_rules" {
     [
       for sg in coalesce(var.vpc_config["security_groups"], []) :
       [
-        for rule in sg["ingress"] :
+        for rule in coalesce(sg["ingress"], []) :
         merge(
           rule,
           tomap(
@@ -36,7 +36,7 @@ resource "aws_security_group_rule" "ingress_rules" {
           join("|", tolist(coalesce(item["ipv6_cidr_blocks"], []))),
           join("|", tolist(coalesce(item["prefix_list_ids"], []))),
           coalesce(item["source_security_group_id"], " "),
-          coalesce(item["self"], " "),
+          item["self"] == null ? " " : tostring(item["self"]),
         )
       )
     ) => item
@@ -63,7 +63,7 @@ resource "aws_security_group_rule" "egress_rules" {
     [
       for sg in coalesce(var.vpc_config["security_groups"], []) :
       [
-        for rule in sg["egress"] :
+        for rule in coalesce(sg["egress"], []) :
         merge(
           rule,
           tomap(
@@ -93,7 +93,7 @@ resource "aws_security_group_rule" "egress_rules" {
           join("|", tolist(coalesce(item["ipv6_cidr_blocks"], []))),
           join("|", tolist(coalesce(item["prefix_list_ids"], []))),
           coalesce(item["source_security_group_id"], " "),
-          coalesce(item["self"], " "),
+          item["self"] == null ? " " : tostring(item["self"]),
         )
       )
     ) => item

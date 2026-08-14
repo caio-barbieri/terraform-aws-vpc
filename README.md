@@ -1,542 +1,314 @@
-# Terraform AWS VPC - Módulo de Configuração de Redes
+# Terraform AWS VPC
 
-Este é um módulo Terraform flexível e reutilizável para criar e gerenciar VPCs na AWS. O módulo suporta diversos componentes de rede como subnets públicas/privadas, Internet Gateways, NAT Gateways, NAT Instances, VPC Peering, Transit Gateway, VPC Endpoints e muito mais.
+Módulo Terraform reutilizável para criar uma VPC AWS com subnets distribuídas por zona de disponibilidade, tabelas de rotas, NACLs, Internet Gateway, NAT Gateway ou NAT Instance, Security Groups, VPC Endpoints, VPC Peering e Transit Gateway.
 
-## 📋 Índice
+## Requisitos
 
-- [Como Funciona](#como-funciona)
-- [Exemplo Prático](#exemplo-prático)
-- [Estrutura do Projeto](#estrutura-do-projeto)
-- [Componentes Suportados](#componentes-suportados)
-- [Uso Básico](#uso-básico)
-- [NAT Instance - Problema e Solução](#nat-instance---problema-e-solução)
-- [Boas Práticas de Segurança](#boas-práticas-de-segurança)
-- [Exemplos Adicionais](#exemplos-adicionais)
+- Terraform `>= 1.3.1`
+- AWS provider `>= 6.0.0`
+- Credenciais e região configuradas pelo módulo raiz
 
-## Como Funciona
+O módulo não configura provider nem backend. O módulo raiz consumidor continua responsável por autenticação, região, estado remoto e lock.
 
-Este módulo utiliza uma abordagem **declarativa** onde você define toda a configuração da VPC através de uma única variável complexa chamada `vpc_config`. O módulo então processa essa configuração e cria todos os recursos necessários na AWS.
-
-### Conceito Principal
-
-```
-Você define → vpc_config (mapa de configuração)
-                    ↓
-Módulo processa → Cria recursos na AWS
-                    ↓
-Resultado → VPC completa com todos os componentes
-```
-
-### Fluxo de Trabalho
-
-1. **Definição**: Você cria um arquivo `main.tf` que chama o módulo
-2. **Configuração**: Define a variável `vpc_config` com as especificações desejadas
-3. **Processamento**: O módulo interpreta a configuração e determina quais recursos criar
-4. **Criação**: Terraform provisiona os recursos na AWS
-5. **Estado**: O estado é armazenado (local ou remoto, como S3)
-
-## Exemplo Prático
-
-Para ilustrar como o módulo funciona, vamos usar um exemplo real de implementação multi-região para uma conta de segurança.
-
-> **Nota**: Este exemplo é uma implementação básica do projeto que foi desenvolvido para um cliente real. A versão completa e atualizada deste projeto está disponível no repositório oficial do cliente em: https://gitlab.dev.roadcard.com.br/infra/terraform-aws-vpc
-
-### Cenário: VPC Multi-Região para Segurança
-
-**Objetivo**: Criar VPCs em duas regiões AWS (us-east-1 e sa-east-1) para hospedar um SIEM baseado em OpenSearch, com acesso via VPN Client.
-
-**Estrutura do Exemplo**:
-```
-test/exemplo-multiregiao/
-├── README.md                    # Documentação específica do exemplo
-├── collect_vpc_data.sh          # Script para coletar CIDRs existentes
-├── client-reports/              # Relatórios gerados (não versionado)
-├── us-east-1/
-│   ├── config.tf               # Backend S3 e provider
-│   └── main.tf                 # Configuração da VPC
-└── sa-east-1/
-    ├── config.tf               # Backend S3 e provider
-    └── main.tf                 # Configuração da VPC
-```
-
-### Passo 1: Planejamento de Endereçamento
-
-Antes de criar as VPCs, é importante identificar CIDRs já utilizados para evitar conflitos. O script `collect_vpc_data.sh` automatiza essa coleta:
-
-```bash
-cd test/exemplo-multiregiao
-./collect_vpc_data.sh
-```
-
-Este script:
-- Busca todos os profiles AWS com um prefixo específico
-- Lista todas as VPCs existentes em cada conta
-- Gera um CSV com VPC ID, Nome, CIDR, Região e se é VPC default
-- Salva em `client-reports/vpc_inventory.csv`
-
-**Resultado da análise**:
-- Blocos 10.x já utilizados: 10.30.0.0/16, 10.71-73.0.0/16, 10.81.0.0/16, etc.
-- Blocos 172.x já utilizados: 172.17.0.0/20, 172.18.0.0/16, 172.31.0.0/16, etc.
-- **Blocos disponíveis identificados**: 10.100.0.0/16 e 10.101.0.0/16
-
-### Passo 2: Configuração do Backend
-
-Arquivo `us-east-1/config.tf`:
-```hcl
-terraform {
-  backend "s3" {
-    bucket = "empresa-terraform-state"
-    key    = "infrastructure/us-east-1/vpc/terraform.tfstate"
-    region = "us-east-1"
-  }
-}
-
-provider "aws" {
-  region  = "us-east-1"
-  profile = "meu-profile"
-}
-```
-
-### Passo 3: Definição da VPC
-
-Arquivo `us-east-1/main.tf`:
-```hcl
-module "vpc" {
-  source = "../../.."  # Aponta para a raiz do módulo
-
-  vpc_config = {
-    # Configuração da VPC principal
-    vpc = {
-      cidr_block = "10.100.0.0/16"
-    }
-    
-    # Tags globais aplicadas a todos os recursos
-    global = {
-      tags = {
-        Name        = "security-vpc"
-        Environment = "security"
-        ManagedBy   = "Terraform"
-        Project     = "SIEM"
-      }
-    }
-    
-    # NAT Gateway desabilitado (não necessário para este caso)
-    nat_gateway = {
-      create = false
-    }
-    
-    # NAT Instance desabilitado
-    nat_instance = {
-      create = false
-    }
-    
-    # Definição das camadas de subnets
-    subnet_layers = [
-      {
-        name        = "public"
-        cidr_block  = ["10.100.0.0/20", "10.100.16.0/20", "10.100.32.0/20"]
-        scope       = "public"
-        map_public_ip_on_launch = true
-        has_outbound_internet_access_via_natgw = false
-        has_outbound_internet_access_via_natinstance = false
-      },
-      {
-        name        = "private"
-        cidr_block  = ["10.100.128.0/20", "10.100.144.0/20", "10.100.160.0/20"]
-        scope       = "private"
-        has_outbound_internet_access_via_natgw = false
-        has_outbound_internet_access_via_natinstance = false
-      }
-    ]
-  }
-}
-```
-
-### Passo 4: Entendendo a Configuração
-
-**VPC Principal** (`vpc`):
-- Define o CIDR principal da VPC
-- Habilita DNS por padrão
-- Cria a VPC base onde todos os outros recursos serão criados
-
-**Tags Globais** (`global.tags`):
-- Aplicadas automaticamente a todos os recursos criados
-- Facilita identificação e billing
-- Permite filtros e buscas na AWS
-
-**Subnet Layers** (`subnet_layers`):
-- **Conceito**: Agrupa subnets com características similares
-- **Public Layer**: 
-  - 3 subnets em 3 AZs diferentes
-  - Auto-assign de IP público habilitado
-  - Rota para Internet Gateway criada automaticamente
-- **Private Layer**:
-  - 3 subnets em 3 AZs diferentes
-  - Sem IP público
-  - Sem rota para internet (ideal para OpenSearch)
-
-**O que o módulo cria automaticamente**:
-1. VPC com o CIDR especificado
-2. Internet Gateway (porque há subnets públicas)
-3. 6 Subnets (3 públicas + 3 privadas)
-4. 6 Route Tables customizadas (uma por subnet)
-5. 1 Route Table principal (main)
-6. Rotas para IGW nas route tables públicas
-7. 2 Network ACLs (uma por layer)
-8. Associações de subnets com NACLs
-9. Security Group padrão (allowlist)
-10. Security Group default (denylist)
-11. DHCP Options Set
-12. Managed Prefix List para internet
-
-### Passo 5: Deploy
-
-```bash
-cd test/exemplo-multiregiao/us-east-1
-terraform init
-terraform plan    # Revise os recursos que serão criados
-terraform apply   # Confirme e crie os recursos
-```
-
-**Saída esperada**: 38 recursos criados
-
-### Passo 6: Replicação para Outra Região
-
-Para sa-east-1, basta:
-1. Copiar a estrutura de arquivos
-2. Ajustar o CIDR para 10.101.0.0/16
-3. Mudar a região no provider para sa-east-1
-4. Ajustar a key do backend S3
-
-O módulo cria exatamente a mesma estrutura, mas em outra região.
-
-## Estrutura do Projeto
-
-```
-terraform-aws-vpc/
-├── README.md                    # Este arquivo
-├── variables.tf                 # Definição da variável vpc_config
-├── main.tf                      # Lógica principal
-├── aws_vpc.tf                   # Recursos de VPC
-├── aws_subnet.tf                # Recursos de Subnets
-├── aws_igw.tf                   # Internet Gateway
-├── aws_nat_gateway.tf           # NAT Gateway
-├── aws_nat_instance.tf          # NAT Instance
-├── aws_peering.tf               # VPC Peering
-├── aws_transit_gateway.tf       # Transit Gateway
-├── aws_vpc_endpoint.tf          # VPC Endpoints
-├── import_natinstance_ami.sh    # Script para importar AMI NAT
-└── test/                        # Exemplos de uso
-    ├── exemplo-multiregiao/     # Exemplo multi-região
-    ├── simple_vpc/              # VPC simples
-    ├── security_group/          # Com security groups
-    └── transit_gateway/         # Com transit gateway
-```
-
-## Componentes Suportados
-
-O módulo suporta a criação e configuração dos seguintes componentes:
-
-| Componente | Descrição | Configuração |
-|------------|-----------|--------------|
-| **VPC** | Rede virtual principal | `vpc_config.vpc` |
-| **Subnets** | Subnets públicas e privadas em múltiplas AZs | `vpc_config.subnet_layers` |
-| **Internet Gateway** | Acesso à internet para subnets públicas | `vpc_config.igw` |
-| **NAT Gateway** | Saída para internet de subnets privadas | `vpc_config.nat_gateway` |
-| **NAT Instance** | Alternativa econômica ao NAT Gateway | `vpc_config.nat_instance` |
-| **Route Tables** | Tabelas de roteamento customizadas | Criadas automaticamente |
-| **Network ACLs** | Firewall em nível de subnet | `vpc_config.subnet_layers[].network_acl_rules` |
-| **Security Groups** | Firewall em nível de instância | `vpc_config.security_groups` |
-| **VPC Peering** | Conexão entre VPCs | `vpc_config.peering_connection` |
-| **Transit Gateway** | Hub central para múltiplas VPCs | `vpc_config.transit_gateway` |
-| **VPC Endpoints** | Acesso privado a serviços AWS | `vpc_config.vpc_endpoints` |
-| **DHCP Options** | Configurações DHCP customizadas | `vpc_config.dhcp_options` |
-
-## Uso Básico
-
-### 1. Estrutura Mínima
-
-```hcl
-module "vpc" {
-  source = "caminho/para/modulo"
-
-  vpc_config = {
-    vpc = {
-      cidr_block = "10.0.0.0/16"
-    }
-    subnet_layers = [
-      {
-        name       = "public"
-        cidr_block = ["10.0.1.0/24"]
-        scope      = "public"
-      }
-    ]
-  }
-}
-```
-
-### 2. Com NAT Gateway
-
-```hcl
-module "vpc" {
-  source = "caminho/para/modulo"
-
-  vpc_config = {
-    vpc = {
-      cidr_block = "10.0.0.0/16"
-    }
-    nat_gateway = {
-      create = true
-      az_widerange = 2  # NAT em 2 AZs
-    }
-    subnet_layers = [
-      {
-        name       = "public"
-        cidr_block = ["10.0.1.0/24", "10.0.2.0/24"]
-        scope      = "public"
-      },
-      {
-        name       = "private"
-        cidr_block = ["10.0.10.0/24", "10.0.20.0/24"]
-        scope      = "private"
-        has_outbound_internet_access_via_natgw = true
-      }
-    ]
-  }
-}
-```
-
-### 3. Com VPC Endpoints
-
-```hcl
-module "vpc" {
-  source = "caminho/para/modulo"
-
-  vpc_config = {
-    vpc = {
-      cidr_block = "10.0.0.0/16"
-    }
-    vpc_endpoints = {
-      s3 = {
-        service_type = "Gateway"
-      }
-      ec2 = {
-        service_type        = "Interface"
-        private_dns_enabled = true
-      }
-    }
-    subnet_layers = [
-      {
-        name       = "private"
-        cidr_block = ["10.0.1.0/24"]
-        scope      = "private"
-      }
-    ]
-  }
-}
-```
-
-## NAT Instance - Problema e Solução
-
-### ⚠️ Problema Identificado
-
-No final de 2024, foi observado que o projeto parou de funcionar porque a **AMI da NAT Instance foi removida de todas as regiões AWS, exceto Irlanda (eu-west-1)**.
-
-### ✅ Solução
-
-Um script chamado `import_natinstance_ami.sh` foi criado para automatizar a importação da AMI para outras regiões.
-
-**Como usar**:
-
-```bash
-# Tornar o script executável
-chmod +x import_natinstance_ami.sh
-
-# Executar o script
-./import_natinstance_ami.sh
-```
-
-O script irá:
-1. Copiar a AMI da região eu-west-1
-2. Importar para a região desejada
-3. Retornar o ID da nova AMI
-
-**Uso no Terraform**:
-
-```hcl
-nat_instance = {
-  create    = true
-  ami_id    = "ami-xxxxxxxxx"  # ID retornado pelo script
-  az_widerange = 2
-}
-```
-
-### Alternativa: NAT Gateway
-
-Se você não precisa de NAT Instance especificamente, considere usar NAT Gateway:
-
-**Vantagens do NAT Gateway**:
-- Gerenciado pela AWS
-- Alta disponibilidade automática
-- Melhor performance
-- Sem necessidade de gerenciar AMIs
-
-**Desvantagens**:
-- Custo mais alto que NAT Instance
-- Cobrado por hora + tráfego
-
-## Boas Práticas de Segurança
-
-### 1. Não Exponha Dados Sensíveis
-
-❌ **Evite**:
-```hcl
-variable "db_password" {
-  default = "senha123"  # NUNCA faça isso!
-}
-```
-
-✅ **Faça**:
-```hcl
-variable "db_password" {
-  type      = string
-  sensitive = true
-  # Valor passado via variável de ambiente TF_VAR_db_password
-}
-```
-
-### 2. Use Backend Remoto com Criptografia
-
-```hcl
-terraform {
-  backend "s3" {
-    bucket         = "meu-tfstate"
-    key            = "vpc/terraform.tfstate"
-    region         = "us-east-1"
-    encrypt        = true
-    dynamodb_table = "terraform-locks"  # Para lock de estado
-  }
-}
-```
-
-### 3. Use Roles IAM ao Invés de Access Keys
+## Uso rápido
 
 ```hcl
 provider "aws" {
   region = "us-east-1"
-  # Usa role do EC2/ECS/Lambda automaticamente
-  # Ou profile configurado em ~/.aws/config
-  profile = "meu-profile"
+}
+
+module "vpc" {
+  source = "git::https://github.com/opsteamhub/terraform-aws-vpc.git?ref=main"
+
+  vpc_config = {
+    vpc = {
+      cidr_block = "10.0.0.0/16"
+    }
+
+    global = {
+      tags = {
+        Name        = "myapp"
+        Environment = "production"
+        Project     = "myapp"
+        Owner       = "platform"
+      }
+    }
+
+    subnet_layers = [
+      {
+        name         = "public"
+        scope        = "public"
+        az_widerange = 2
+      },
+      {
+        name         = "private"
+        az_widerange = 2
+      }
+    ]
+  }
 }
 ```
 
-### 4. Versionamento do Bucket de State
+Quando `cidr_block` não é informado na camada, o módulo deriva subnets determinísticas e não sobrepostas na ordem declarada. O padrão adiciona 8 bits ao prefixo da VPC (`/16` vira `/24`); use `netlength`, `netnum` ou CIDRs explícitos quando precisar controlar o layout.
 
-```bash
-aws s3api put-bucket-versioning \
-  --bucket meu-tfstate \
-  --versioning-configuration Status=Enabled
+Em produção, substitua `ref=main` por uma tag ou SHA revisada. O repositório ainda não possui releases versionadas.
+
+Exemplos locais executáveis estão em [`examples/basic`](examples/basic) e [`examples/complete`](examples/complete).
+
+## O que é criado por padrão
+
+Para uma VPC nova, o módulo cria:
+
+- VPC com DNS habilitado;
+- Internet Gateway;
+- DHCP Options com domínio regional correto;
+- subnets, uma route table e uma NACL por camada;
+- rota para Internet Gateway nas subnets com `scope = "public"`;
+- default NACL bloqueada e default Security Group sem regras;
+- Security Group auxiliar limitado ao CIDR da VPC;
+- managed prefix list para `0.0.0.0/0`.
+
+NAT, IPv6, Flow Logs, endpoints, peering e Transit Gateway são opt-in.
+
+## Modelo de segurança de rede
+
+Os Security Groups são o filtro primário e stateful. Para preservar conectividade genérica, as NACLs de cada camada são neutras por padrão e permitem todo o tráfego IPv4; quando IPv6 está habilitado, também permitem IPv6. Use `network_acl_rules` e Security Groups específicos para impor restrições compatíveis com o workload. A opção legada de quarentena mantém o bloqueio total da default NACL para subnets selecionadas.
+
+Flow Logs são opt-in para evitar criar custo e destinos de logs sem decisão do consumidor. Para ambientes governados, habilite-os no baseline conforme o exemplo completo.
+
+## NAT Gateway
+
+Uma subnet pública já é candidata a hospedar o NAT Gateway; não é necessário repetir `nat_gw_scope = "public"`.
+
+```hcl
+nat_gateway = {
+  create       = true
+  az_widerange = 2
+}
+
+subnet_layers = [
+  {
+    name         = "public"
+    scope        = "public"
+    az_widerange = 2
+    cidr_block   = ["10.0.0.0/24", "10.0.1.0/24"]
+  },
+  {
+    name                                   = "private"
+    az_widerange                           = 2
+    cidr_block                             = ["10.0.10.0/24", "10.0.11.0/24"]
+    has_outbound_internet_access_via_natgw = true
+  }
+]
 ```
 
-### 5. Use .gitignore
+Revise o custo antes do apply: o módulo pode criar mais de um NAT Gateway conforme `az_widerange`.
 
-```gitignore
-# Terraform
-.terraform/
-*.tfstate
-*.tfstate.*
-*.tfvars
-.terraform.lock.hcl
+## NAT Instance
 
-# Dados sensíveis
-secrets/
-*.pem
-*.key
+A AWS não mantém mais uma NAT AMI atual. Use uma AMI própria baseada em um sistema operacional suportado ou prefira NAT Gateway. A NAT AMI precisa habilitar IP forwarding e NAT de forma persistente.
+
+```hcl
+nat_instance = {
+  create                    = true
+  ami_id                    = "ami-0123456789abcdef0"
+  az_widerange              = 1
+  instance_type             = "t3.medium"
+  iam_instance_profile_name = "nat-instance-ssm"
+  instance_tags = {
+    PatchGroup = "network"
+  }
+}
 ```
 
-## Exemplos Adicionais
+O launch template exige IMDSv2. O Security Group da NAT Instance aceita entrada somente do CIDR da VPC; a saída permanece aberta porque esse é o objetivo do recurso.
 
-O diretório `test/` contém diversos exemplos práticos:
+Quando há NAT Instances em múltiplas AZs, cada subnet privada prefere a ENI NAT da mesma AZ. Cada instância é mantida por um Auto Scaling Group com health check EC2. Isso fornece isolamento e recuperação por AZ, mas não altera automaticamente rotas para outra AZ durante uma falha regional da NAT Instance.
 
-### simple_vpc
-VPC básica com subnets públicas e privadas.
+## VPC Flow Logs
 
-```bash
-cd test/simple_vpc
-terraform init
-terraform apply
+O caminho mais simples cria Log Group, role de entrega e Flow Log para todo o tráfego da VPC:
+
+```hcl
+flow_logs = {
+  create                       = true
+  traffic_type                 = "ALL"
+  cloudwatch_retention_in_days = 90
+  cloudwatch_kms_key_id        = "arn:aws:kms:us-east-1:123456789012:key/..."
+}
 ```
 
-### security_group
-Exemplo de VPC com security groups customizados.
+A trust policy gerada restringe o serviço pelo account ID e ARN do Flow Log. Para uma centralização já existente, informe `log_destination_arn` e `iam_role_arn`. Destinos `s3` e `kinesis-data-firehose` exigem `log_destination_arn` e suas policies devem ser mantidas pelo consumidor.
 
-```bash
-cd test/security_group
-terraform init
-terraform apply
+## IPv6 dual-stack
+
+```hcl
+ipv6 = {
+  enabled = true
+}
 ```
 
-### transit_gateway
-VPC conectada a um Transit Gateway para arquitetura hub-and-spoke.
+Para uma VPC nova, o padrão solicita um bloco IPv6 `/56` da AWS. Cada subnet habilitada recebe um `/64` determinístico e não sobreposto. Subnets públicas recebem rota `::/0` pelo Internet Gateway; subnets privadas usam um Egress-only Internet Gateway.
 
-```bash
-cd test/transit_gateway
-terraform init
-terraform apply
+Para uma VPC existente, informe o CIDR já associado e decida explicitamente se o módulo deve criar o Egress-only Internet Gateway:
+
+```hcl
+ipv6 = {
+  enabled                             = true
+  assign_generated_ipv6_cidr_block    = false
+  ipv6_cidr_block                     = "2600:1f18:abcd:1200::/56"
+  create_egress_only_internet_gateway = false
+  egress_only_internet_gateway_id     = "eigw-0123456789abcdef0"
+}
 ```
 
-### vpc_default_configs
-Demonstra o uso de configurações padrão do módulo.
+## VPC Endpoints
 
-```bash
-cd test/vpc_default_configs
-terraform init
-terraform apply
+Gateway endpoints usam todas as route tables criadas pelo módulo quando `route_table_ids` e `route_tables_filter` não são informados.
+
+```hcl
+vpc_endpoints = {
+  s3 = {
+    service_type = "Gateway"
+  }
+
+  ec2 = {
+    service_type = "Interface"
+    subnet_ids    = ["subnet-0123456789abcdef0"]
+  }
+}
 ```
 
-## Variáveis Principais
+Para Interface endpoints, informe `subnet_ids` para seleção determinística. Sem IDs explícitos, o filtro legado procura `tag:subnet_layer = awssvc`; use `subnet_filter` para selecionar outra camada.
 
-### vpc_config
+## Transit Gateway
 
-Variável complexa que contém toda a configuração da VPC. Estrutura:
+O módulo pode criar ou referenciar um Transit Gateway, anexar a VPC e gerenciar rotas dos dois lados:
+
+```hcl
+transit_gateway = {
+  core = {
+    create = true
+
+    vpc_attachment = {
+      create             = true
+      subnet_layer_names = ["private"]
+      ipv6_support       = "enable"
+    }
+
+    transit_gateway_routes = {
+      local_vpc = {
+        destination_cidr_block = "10.0.0.0/16"
+      }
+    }
+
+    vpc_routes = {
+      shared_services = {
+        destination_cidr_block = "10.100.0.0/16"
+        subnet_layer_names     = ["private"]
+      }
+    }
+  }
+}
+```
+
+Para um Transit Gateway existente, configure `create = false`, `transit_gateway_id` e o `transit_gateway_route_table_id` de cada rota TGW. O módulo não tenta descobrir route tables de um gateway compartilhado.
+
+## VPC existente
 
 ```hcl
 vpc_config = {
-  vpc              = { ... }  # Configuração da VPC
-  global           = { ... }  # Tags e configurações globais
-  igw              = { ... }  # Internet Gateway
-  nat_gateway      = { ... }  # NAT Gateway
-  nat_instance     = { ... }  # NAT Instance
-  subnet_layers    = [ ... ]  # Subnets
-  security_groups  = [ ... ]  # Security Groups
-  vpc_endpoints    = { ... }  # VPC Endpoints
-  peering_connection = [ ... ] # VPC Peering
-  transit_gateway  = { ... }  # Transit Gateway
-  dhcp_options     = { ... }  # DHCP Options
+  vpc = {
+    create = false
+    vpc_id = "vpc-0123456789abcdef0"
+  }
 }
 ```
 
-Para detalhes completos de cada subitem, consulte o arquivo `variables.tf`.
+`vpc_id` é obrigatório quando `create = false`. Os componentes que suportam VPC existente usam esse ID; recursos padrão pertencentes a uma VPC nova não são alterados.
+O módulo consulta a VPC existente para obter o CIDR usado pelos Security Groups gerados para NAT Instance e Interface Endpoints.
 
-## Contribuindo
+## Contrato principal
 
-Contribuições são bem-vindas! Por favor:
+Todo o contrato entra em `vpc_config`:
 
-1. Fork o projeto
-2. Crie uma branch para sua feature (`git checkout -b feature/MinhaFeature`)
-3. Commit suas mudanças (`git commit -m 'Adiciona MinhaFeature'`)
-4. Push para a branch (`git push origin feature/MinhaFeature`)
-5. Abra um Pull Request
+| Campo | Finalidade | Padrão |
+|---|---|---|
+| `vpc` | VPC nova por CIDR/IPAM ou referência a VPC existente | obrigatório |
+| `global.tags` | Tags compartilhadas | `{}` |
+| `global.az` | Estado e Zone IDs excluídos | `{}` |
+| `flow_logs` | Entrega para CloudWatch Logs, S3 ou Firehose | desabilitado |
+| `ipv6` | Bloco IPv6, subnets dual-stack e egress-only IGW | desabilitado |
+| `subnet_layers` | Camadas, CIDRs, AZs, rotas e NACLs | `[]` |
+| `igw` | Internet Gateway | `{ create = true }` |
+| `dhcp_options` | DHCP Options | DNS da Amazon e domínio regional |
+| `nat_gateway` | NAT Gateways e AZs | desabilitado |
+| `nat_instance` | NAT Instances e AMI própria | desabilitado |
+| `security_groups` | Security Groups e regras | `[]` |
+| `vpc_endpoints` | Gateway e Interface endpoints | `{}` |
+| `peering_connection` | Request/accept e rotas de peering | `[]` |
+| `transit_gateway` | Gateways, VPC attachments e rotas TGW/VPC | `{}` |
 
-## Licença
+O Terraform valida combinações essenciais antes do plan, incluindo CIDR versus IPAM, VPC existente sem ID, NAT sem subnet pública, listas de CIDR menores que a quantidade de AZs, nomes duplicados de subnet layer, tipos de endpoint e contratos de peering/TGW.
 
-Este projeto está sob a licença MIT. Veja o arquivo LICENSE para mais detalhes.
+## Outputs
 
-## Referências
+| Output | Conteúdo |
+|---|---|
+| `vpc_id` | ID da VPC criada ou referenciada |
+| `vpc_ids` | IDs de VPCs criadas, mantido por compatibilidade |
+| `subnet_ids` | IDs por layer/AZ |
+| `public_subnet_ids` | IDs de subnets públicas |
+| `private_subnet_ids` | IDs de subnets privadas |
+| `route_table_ids` | IDs de route tables por subnet |
+| `internet_gateway_id` | ID do Internet Gateway criado |
+| `ipv6_cidr_block` | CIDR IPv6 associado à VPC |
+| `egress_only_internet_gateway_id` | ID do Egress-only Internet Gateway |
+| `nat_gateway_ids` | IDs de NAT Gateways por subnet pública |
+| `nat_instance_network_interface_ids` | ENIs das NAT Instances por subnet pública |
+| `sg_ids` | IDs dos Security Groups configurados |
+| `vpc_endpoint_ids` | IDs dos endpoints pelo nome configurado |
+| `transit_gateway_ids` | IDs de Transit Gateways criados ou referenciados |
+| `transit_gateway_vpc_attachment_ids` | IDs dos attachments por Transit Gateway |
+| `vpc_flow_log_id` | ID do VPC Flow Log |
+| `vpc_flow_log_group_arn` | ARN do Log Group gerenciado ou informado |
+| `peering_connection_data` | Dados das conexões de peering criadas |
 
-- HashiCorp (2023) Resource: aws_vpc. https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc
-- HashiCorp (2023) Resource: aws_subnet. https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/subnet
-- HashiCorp (2023) Resource: aws_internet_gateway. https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/internet_gateway
-- HashiCorp (2023) Resource: aws_nat_gateway. https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/nat_gateway
-- HashiCorp (2023) Resource: aws_vpc_peering_connection. https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_peering_connection
-- HashiCorp (2023) Resource: aws_vpc_endpoint. https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/vpc_endpoint
+## Verificação local
+
+```bash
+terraform fmt -check -recursive
+terraform init -backend=false
+terraform validate
+terraform test -test-directory=testing
+
+terraform -chdir=examples/basic init -backend=false
+terraform -chdir=examples/basic validate
+
+terraform -chdir=examples/complete init -backend=false
+terraform -chdir=examples/complete validate
+```
+
+Os testes usam provider AWS mockado e não criam infraestrutura nem precisam de credenciais.
+
+## Migração da versão anterior
+
+Esta atualização remove compatibilidade com AWS provider 4.x. Antes de adotar:
+
+1. execute o plan com a versão anterior e confirme ausência de drift inesperado;
+2. atualize Terraform e a constraint do provider no módulo raiz;
+3. execute `terraform init -upgrade`;
+4. revise o plan, especialmente tags, tipos antes representados como strings, regras dos Security Groups auxiliares e Transit Gateways configurados com `create = false`;
+5. aplique primeiro em ambiente não produtivo.
+
+O argumento removido `aws_eip.vpc` foi migrado para `domain = "vpc"`. Nenhum rename de endereço Terraform foi introduzido nos recursos existentes. Os antigos diretórios `test/`, que continham backends compartilhados e dados específicos de cliente, foram substituídos por `testing/` e `examples/` seguros por padrão.
+
+## Limites atuais
+
+- IPv6 está implementado para dual-stack; subnets exclusivamente IPv6 ainda não são suportadas.
+- Flow Logs podem usar destinos centralizados existentes, mas o módulo não cria buckets S3, Firehose ou policies cross-account.
+- Transit Gateway não cria RAM shares nem aceita attachments cross-account.
+- NAT Instance depende de AMI mantida pelo consumidor e não oferece failover automático de rotas entre AZs; para esse requisito, prefira NAT Gateway ou uma solução de appliance dedicada.
+- O repositório ainda não publica tags/releases, portanto consumidores externos não têm uma versão SemVer oficial para fixar.
+
+Esses itens devem ser tratados como evoluções separadas porque ampliam permissões, custo ou risco de recriação.

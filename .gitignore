@@ -5,8 +5,8 @@
 *.tfstate
 *.tfstate.*
 
-# .hcl
-**.hcl
+# Dependency lock files are owned by root modules, not this reusable module
+**/.terraform.lock.hcl
 
 # out files
 **/.out
@@ -31,8 +31,11 @@ override.tf.json
 #
 # !example_override.tf
 
-# Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
-# example: *tfplan*
+# Terraform plan files
+*.tfplan
+
+# Local build artifacts
+a.out
 
 *.swp
 **/*.swp
