@@ -38,7 +38,7 @@ request is merged.
 
 The repository must allow GitHub Actions to write contents and pull requests. Add a
 `RELEASE_PLEASE_TOKEN` Actions secret backed by a GitHub App or fine-grained token
-with contents and pull-request write permissions so release pull requests trigger
+with contents, issues, and pull-request write permissions so release PRs trigger
 the normal validation workflows. Without it, the workflow falls back to
 `GITHUB_TOKEN`, whose pull requests do not trigger other workflows.
 
