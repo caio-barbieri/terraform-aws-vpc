@@ -313,6 +313,14 @@ resource "aws_launch_template" "natinstance_lt" {
   name_prefix   = format("lt-natinstance-%s", each.key)
   image_id      = var.vpc_config["nat_instance"]["ami_id"]
   instance_type = var.vpc_config["nat_instance"]["instance_type"]
+  key_name      = try(var.vpc_config["nat_instance"]["key_name"], null)
+
+  dynamic "iam_instance_profile" {
+    for_each = try(var.vpc_config["nat_instance"]["iam_instance_profile"], null) != null ? [1] : []
+    content {
+      name = var.vpc_config["nat_instance"]["iam_instance_profile"]
+    }
+  }
 
   tags = local.common_tags
 
@@ -323,7 +331,10 @@ resource "aws_launch_template" "natinstance_lt" {
 
   tag_specifications {
     resource_type = "instance"
-    tags          = local.common_tags
+    tags = merge(
+      local.common_tags,
+      try(var.vpc_config["nat_instance"]["instance_tags"], {})
+    )
   }
 
   lifecycle {
