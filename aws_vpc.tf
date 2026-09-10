@@ -9,19 +9,13 @@ resource "aws_vpc" "vpc" {
   enable_dns_support                   = each.value["enable_dns_support"]
   enable_network_address_usage_metrics = each.value["enable_network_address_usage_metrics"]
   instance_tenancy                     = each.value["instance_tenancy"]
-  ipv4_ipam_pool_id                    = each.value["ipv4_ipam_pool_id"]
-  ipv4_netmask_length                  = each.value["ipv4_ipam_pool_id"] != null ? var.vpc_config["vpc"]["ipv4_netmask_length"] : null
+  ipv4_ipam_pool_id                    = local.ipv4_ipam_pool_id
+  ipv4_netmask_length                  = local.ipv4_ipam_pool_id != null ? var.vpc_config["vpc"]["ipv4_netmask_length"] : null
   tags = merge(
     local.common_tags,
     var.vpc_config["vpc"]["tags"],
     {
-      Name = upper(
-        try(
-          local.common_tags["name"],
-          local.common_tags["stack"],
-          "null"
-        )
-      )
+      Name = local.vpc_name
     }
   )
 }
@@ -51,14 +45,38 @@ resource "aws_default_network_acl" "default_nacl_quarentine_subnets" {
     to_port    = 0
   }
 
+  dynamic "ingress" {
+    for_each = local.ipv6_enabled ? [1] : []
+    content {
+      protocol        = -1
+      rule_no         = 2
+      action          = "deny"
+      ipv6_cidr_block = "::/0"
+      from_port       = 0
+      to_port         = 0
+    }
+  }
+
+  dynamic "egress" {
+    for_each = local.ipv6_enabled ? [1] : []
+    content {
+      protocol        = -1
+      rule_no         = 2
+      action          = "deny"
+      ipv6_cidr_block = "::/0"
+      from_port       = 0
+      to_port         = 0
+    }
+  }
+
   tags = merge(
+    local.common_tags,
     {
-      "Name"                     = upper(format("nacl-quarentine-%s", each.value["tags"]["stack"]))
+      "Name"                     = format("NACL-QUARENTINE-%s", local.vpc_name)
       "opsteam:ParentObject"     = each.value["id"]
       "opsteam:ParentObjectArn"  = each.value["arn"]
       "opsteam:ParentObjectType" = "VPC"
-    },
-    local.common_tags
+    }
   )
 
   lifecycle {
@@ -75,13 +93,13 @@ resource "aws_default_route_table" "default_routetable" {
 
   default_route_table_id = each.value["default_route_table_id"]
   tags = merge(
+    local.common_tags,
     {
-      "Name"                     = upper(format("main-routetable-%s", each.value["tags"]["stack"]))
+      "Name"                     = format("MAIN-ROUTETABLE-%s", local.vpc_name)
       "opsteam:ParentObject"     = each.value["id"]
       "opsteam:ParentObjectArn"  = each.value["arn"]
       "opsteam:ParentObjectType" = "VPC"
-    },
-    local.common_tags
+    }
   )
 }
 
@@ -100,8 +118,8 @@ resource "aws_security_group" "sg_allowlist" {
     from_port        = 0
     to_port          = 0
     protocol         = "-1"
-    cidr_blocks      = ["0.0.0.0/0"]
-    ipv6_cidr_blocks = ["::/0"]
+    cidr_blocks      = [each.value["cidr_block"]]
+    ipv6_cidr_blocks = local.ipv6_enabled ? [local.vpc_ipv6_cidr_block] : []
   }
 
   egress {
@@ -109,17 +127,17 @@ resource "aws_security_group" "sg_allowlist" {
     to_port          = 0
     protocol         = "-1"
     cidr_blocks      = ["0.0.0.0/0"]
-    ipv6_cidr_blocks = ["::/0"]
+    ipv6_cidr_blocks = local.ipv6_enabled ? ["::/0"] : []
   }
 
   tags = merge(
+    local.common_tags,
     {
-      "Name"                     = upper(format("allowlist-%s", each.value["tags"]["stack"]))
+      "Name"                     = format("ALLOWLIST-%s", local.vpc_name)
       "opsteam:ParentObject"     = each.value["id"]
       "opsteam:ParentObjectArn"  = each.value["arn"]
       "opsteam:ParentObjectType" = "VPC"
-    },
-    local.common_tags
+    }
   )
 
 }
@@ -135,13 +153,13 @@ resource "aws_default_security_group" "default_sg_denylist" {
   vpc_id = each.value["id"]
 
   tags = merge(
+    local.common_tags,
     {
-      "Name"                     = upper(format("denylist-%s", each.value["tags"]["stack"]))
+      "Name"                     = format("DENYLIST-%s", local.vpc_name)
       "opsteam:ParentObject"     = each.value["id"]
       "opsteam:ParentObjectArn"  = each.value["arn"]
       "opsteam:ParentObjectType" = "VPC"
-    },
-    local.common_tags
+    }
   )
 }
 
@@ -155,7 +173,7 @@ resource "aws_ec2_managed_prefix_list" "managed_prefixlist_internet" {
     }
   ) : {}
 
-  name           = upper(format("prefixlist-internet-%s", each.value["tags"]["stack"]))
+  name           = format("PREFIXLIST-INTERNET-%s", local.vpc_name)
   address_family = "IPv4"
   max_entries    = 1
 
@@ -165,13 +183,13 @@ resource "aws_ec2_managed_prefix_list" "managed_prefixlist_internet" {
   }
 
   tags = merge(
+    local.common_tags,
     {
-      "Name"                     = upper(format("prefixlist-internet-%s", each.value["tags"]["stack"]))
+      "Name"                     = format("PREFIXLIST-INTERNET-%s", local.vpc_name)
       "opsteam:ParentObject"     = each.value["id"]
       "opsteam:ParentObjectArn"  = each.value["arn"]
       "opsteam:ParentObjectType" = "VPC"
-    },
-    local.common_tags
+    }
   )
 
 }

@@ -1,64 +1,32 @@
 locals {
-
-  #
-  # List of subnets to be used to deploy NatGW
-  #
-  nat_gw_subnets = try(
-    element(
-      chunklist(
-        keys(
-          { for k, v in zipmap(
-            flatten(
-              [for x in local.subnets :
-                keys(x)
-              ]
-            ),
-            flatten(
-              [for x in local.subnets :
-                values(x)
-              ]
-            )
-            ) :
-            k => "natgw_subnet" if(
-              v["nat_gw_scope"] == "public"
-              && contains(
-                coalesce(
-                  var.vpc_config["nat_gateway"]["az_ids"],
-                  data.aws_availability_zones.region_azs.zone_ids
-                ),
-                v["az_id"]
-              )
-              ) && (
-              v["nat_gw_scope"] == "public"
-              && contains(
-                setsubtract(
-                  coalesce(
-                    var.vpc_config["nat_gateway"]["az_ids"],
-                    data.aws_availability_zones.region_azs.zone_ids
-                  ),
-                  coalesce(
-                    var.vpc_config["nat_gateway"]["exclude_az_ids"],
-                    []
-                  )
-                ),
-                v["az_id"]
-              )
-            )
-          }
-        ),
-        var.vpc_config["nat_gateway"]["az_widerange"]
+  nat_gateway_candidate_subnets = {
+    for key, subnet in local.map_of_subnets : key => subnet
+    if subnet.create &&
+    coalesce(subnet.nat_gw_scope, subnet.scope) == "public" &&
+    contains(
+      setsubtract(
+        coalesce(var.vpc_config.nat_gateway.az_ids, data.aws_availability_zones.region_azs.zone_ids),
+        coalesce(var.vpc_config.nat_gateway.exclude_az_ids, toset([]))
       ),
-      0
-    ),
-    null
+      subnet.az_id
+    )
+  }
+
+  nat_gw_subnets = slice(
+    sort(keys(local.nat_gateway_candidate_subnets)),
+    0,
+    min(var.vpc_config.nat_gateway.az_widerange, length(local.nat_gateway_candidate_subnets))
   )
 
-  #
-  # List of subnets that should have route pointing the internet access throught Nat GW
-  #
-  has_outbound_internet_access_via_natgw = [for k, v in local.map_of_subnets :
-    k if v["has_outbound_internet_access_via_natgw"] == true
-  ]
+  nat_gateway_route_subnets = {
+    for key, subnet in local.map_of_subnets : key => subnet
+    if subnet.create && subnet.has_outbound_internet_access_via_natgw
+  }
+
+  nat_gateway_subnet_by_az = {
+    for subnet_key in coalesce(local.nat_gw_subnets, []) :
+    local.map_of_subnets[subnet_key].az_id => subnet_key
+  }
 
 }
 
@@ -66,58 +34,11 @@ locals {
 # Deploy EIP allocation
 #
 resource "aws_eip" "natgw_eip" {
+  for_each = var.vpc_config.nat_gateway.create ? toset(local.nat_gw_subnets) : toset([])
 
-  for_each = local.subnets != [] ? try(var.vpc_config["nat_gateway"]["create"], false) == true ? toset(
-    element(
-      chunklist(
-        keys(
-          { for k, v in zipmap(
-            flatten(
-              [for x in local.subnets :
-                keys(x)
-              ]
-            ),
-            flatten(
-              [for x in local.subnets :
-                values(x)
-              ]
-            )
-            ) :
-            k => "natgw_subnet" if(
-              v["nat_gw_scope"] == "public"
-              && contains(
-                coalesce(
-                  var.vpc_config["nat_gateway"]["az_ids"],
-                  data.aws_availability_zones.region_azs.zone_ids
-                ),
-                v["az_id"]
-              )
-              ) && (
-              v["nat_gw_scope"] == "public"
-              && contains(
-                setsubtract(
-                  coalesce(
-                    var.vpc_config["nat_gateway"]["az_ids"],
-                    data.aws_availability_zones.region_azs.zone_ids
-                  ),
-                  coalesce(
-                    var.vpc_config["nat_gateway"]["exclude_az_ids"],
-                    []
-                  )
-                ),
-                v["az_id"]
-              )
-            )
-          }
-        ),
-        var.vpc_config["nat_gateway"]["az_widerange"]
-      ),
-      0
-    )
-  ) : toset([]) : toset([])
-
-  vpc = true
+  domain = "vpc"
   tags = merge(
+    local.common_tags,
     tomap(
       {
         "Name" = upper(
@@ -130,8 +51,7 @@ resource "aws_eip" "natgw_eip" {
         "opsteam:ParentObjectArn"  = aws_subnet.subnets[each.key].arn
         "opsteam:ParentObjectType" = "Subnet"
       }
-    ),
-    local.common_tags
+    )
   )
 
   depends_on = [
@@ -144,60 +64,13 @@ resource "aws_eip" "natgw_eip" {
 #### Deploy Nat GW
 ####
 resource "aws_nat_gateway" "nat-gw" {
-
-  for_each = local.subnets != [] ? var.vpc_config["nat_gateway"]["create"] == true ? toset(
-    element(
-      chunklist(
-        keys(
-          { for k, v in zipmap(
-            flatten(
-              [for x in local.subnets :
-                keys(x)
-              ]
-            ),
-            flatten(
-              [for x in local.subnets :
-                values(x)
-              ]
-            )
-            ) :
-            k => "natgw_subnet" if(
-              v["nat_gw_scope"] == "public"
-              && contains(
-                coalesce(
-                  var.vpc_config["nat_gateway"]["az_ids"],
-                  data.aws_availability_zones.region_azs.zone_ids
-                ),
-                v["az_id"]
-              )
-              ) && (
-              v["nat_gw_scope"] == "public"
-              && contains(
-                setsubtract(
-                  coalesce(
-                    var.vpc_config["nat_gateway"]["az_ids"],
-                    data.aws_availability_zones.region_azs.zone_ids
-                  ),
-                  coalesce(
-                    var.vpc_config["nat_gateway"]["exclude_az_ids"],
-                    []
-                  )
-                ),
-                v["az_id"]
-              )
-            )
-          }
-        ),
-        var.vpc_config["nat_gateway"]["az_widerange"]
-      ),
-      0
-    )
-  ) : toset([]) : toset([])
+  for_each = var.vpc_config.nat_gateway.create ? toset(local.nat_gw_subnets) : toset([])
 
   allocation_id = aws_eip.natgw_eip[each.key].id
   subnet_id     = aws_subnet.subnets[each.key].id
 
   tags = merge(
+    local.common_tags,
     tomap(
       {
         "Name" = upper(
@@ -210,8 +83,7 @@ resource "aws_nat_gateway" "nat-gw" {
         "opsteam:ParentObjectArn"  = aws_subnet.subnets[each.key].arn
         "opsteam:ParentObjectType" = "Subnet"
       }
-    ),
-    local.common_tags
+    )
   )
 
 }
@@ -220,9 +92,15 @@ resource "aws_nat_gateway" "nat-gw" {
 # Deploy Routes to Nat GW
 #
 resource "aws_route" "r_natgw" {
-  for_each = local.subnets != [] ? var.vpc_config["nat_gateway"]["create"] == true ? toset(local.has_outbound_internet_access_via_natgw) : toset([]) : toset([])
+  for_each = var.vpc_config.nat_gateway.create ? local.nat_gateway_route_subnets : {}
 
   route_table_id             = aws_route_table.rt[each.key].id
   destination_prefix_list_id = aws_ec2_managed_prefix_list.managed_prefixlist_internet["vpc"].id
-  nat_gateway_id             = aws_nat_gateway.nat-gw[element(local.nat_gw_subnets, index(local.has_outbound_internet_access_via_natgw, each.key))].id
+  nat_gateway_id = aws_nat_gateway.nat-gw[
+    lookup(
+      local.nat_gateway_subnet_by_az,
+      local.map_of_subnets[each.key].az_id,
+      element(local.nat_gw_subnets, 0)
+    )
+  ].id
 }

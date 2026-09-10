@@ -17,7 +17,7 @@ locals {
   # handle the CIDR block definition based in the user inputs. 
   #
   subnets = [
-    for y in coalesce(var.vpc_config["subnet_layers"], []) :
+    for layer_index, y in coalesce(var.vpc_config["subnet_layers"], []) :
     {
       for w, z in coalesce(
         y["az_ids"],
@@ -44,9 +44,31 @@ locals {
                 )
               ),
               y["netlength"],
-              y["netnum"] + w
+              coalesce(
+                y["netnum"],
+                sum([
+                  for previous_index, previous_layer in var.vpc_config.subnet_layers :
+                  previous_index < layer_index ? (
+                    previous_layer.az_ids != null ? length(previous_layer.az_ids) : previous_layer.az_widerange
+                  ) : 0
+                ])
+              ) + w
             )
           )
+          "ipv6_enabled" : local.ipv6_enabled && y["ipv6_enabled"],
+          "ipv6_cidr_block" : local.ipv6_enabled && y["ipv6_enabled"] ? try(
+            element(y["ipv6_cidr_block"], w),
+            cidrsubnet(
+              local.vpc_ipv6_cidr_block,
+              64 - tonumber(element(split("/", local.vpc_ipv6_cidr_block), 1)),
+              sum([
+                for previous_index, previous_layer in var.vpc_config.subnet_layers :
+                previous_index < layer_index ? (
+                  previous_layer.az_ids != null ? length(previous_layer.az_ids) : previous_layer.az_widerange
+                ) : 0
+              ]) + w
+            )
+          ) : null,
           "subnet_layer_ordered_id" : w,
           "subnet_name" : format("%s-%s", y["name"], z),
           "vpc_id" : try(
@@ -97,12 +119,16 @@ resource "aws_subnet" "subnets" {
     k => v if v["create"] == true
   }
 
-  availability_zone_id                        = each.value["az_id"]
-  cidr_block                                  = each.value["cidr_block"]
-  enable_resource_name_dns_a_record_on_launch = each.value["enable_resource_name_dns_a_record_on_launch"]
-  map_public_ip_on_launch                     = each.value["map_public_ip_on_launch"]
-  private_dns_hostname_type_on_launch         = each.value["private_dns_hostname_type_on_launch"]
-  vpc_id                                      = each.value["vpc_id"]
+  availability_zone_id                           = each.value["az_id"]
+  assign_ipv6_address_on_creation                = each.value["ipv6_enabled"] ? each.value["assign_ipv6_address_on_creation"] : false
+  cidr_block                                     = each.value["cidr_block"]
+  enable_dns64                                   = each.value["ipv6_enabled"] ? each.value["enable_dns64"] : false
+  enable_resource_name_dns_a_record_on_launch    = each.value["enable_resource_name_dns_a_record_on_launch"]
+  enable_resource_name_dns_aaaa_record_on_launch = each.value["ipv6_enabled"] ? each.value["enable_resource_name_dns_aaaa_record_on_launch"] : false
+  ipv6_cidr_block                                = each.value["ipv6_cidr_block"]
+  map_public_ip_on_launch                        = each.value["map_public_ip_on_launch"]
+  private_dns_hostname_type_on_launch            = each.value["private_dns_hostname_type_on_launch"]
+  vpc_id                                         = each.value["vpc_id"]
   tags = merge(
     local.common_tags,
     tomap(
@@ -180,7 +206,7 @@ resource "aws_ec2_managed_prefix_list" "managed_prefixlist_adhoc_route" {
         [
           for y, z in coalesce(x["routes"], []) :
           format("%s|%s", x["name"], y)
-        ] if x["routes"] != null
+        ] if x["create"] && x["routes"] != null
       ]
     ),
     flatten(
@@ -188,7 +214,7 @@ resource "aws_ec2_managed_prefix_list" "managed_prefixlist_adhoc_route" {
         [
           for y, z in coalesce(x["routes"], []) :
           format("%s|%s|%s|%s", x["name"], y, join(",", element(x["routes"], y)["destination_cidr_block"]), element(x["routes"], y)["target"])
-        ] if x["routes"] != null
+        ] if x["create"] && x["routes"] != null
       ]
     )
   )
@@ -207,10 +233,10 @@ resource "aws_ec2_managed_prefix_list" "managed_prefixlist_adhoc_route" {
   }
 
   tags = merge(
+    local.common_tags,
     {
       "Name" = upper(format("prefixlist-internet-%s", each.key))
-    },
-    local.common_tags
+    }
   )
 
 }
@@ -235,7 +261,7 @@ resource "aws_route" "r_adhoc" {
             []
           ) :
           format("%s|%s|%s", v["name"], v["az_id"], y) if contains(coalesce(z["az_ids"], data.aws_availability_zones.region_azs.zone_ids), v["az_id"])
-        ]
+        ] if v["create"]
       ]
     ),
     flatten(
@@ -257,7 +283,7 @@ resource "aws_route" "r_adhoc" {
             prefix_list_tf_id = format("%s|%s", v["name"], y)
             target            = z["target"]
           } if contains(coalesce(z["az_ids"], data.aws_availability_zones.region_azs.zone_ids), v["az_id"])
-        ]
+        ] if v["create"]
       ]
     )
   )
@@ -277,7 +303,7 @@ resource "aws_route" "r_adhoc" {
   network_interface_id      = startswith(each.value["target"], "eni-") ? each.value["target"] : null
   transit_gateway_id        = startswith(each.value["target"], "tgw-") ? each.value["target"] : null
   vpc_endpoint_id           = startswith(each.value["target"], "vpce-") ? each.value["target"] : null
-  vpc_peering_connection_id = startswith(each.value["target"], "pwc-") ? each.value["target"] : null
+  vpc_peering_connection_id = startswith(each.value["target"], "pcx-") ? each.value["target"] : null
 }
 
 ###########################################################################################################################
@@ -286,14 +312,10 @@ resource "aws_route" "r_adhoc" {
 
 resource "aws_network_acl" "nacl" {
 
-  for_each = zipmap(
-    [for y in coalesce(var.vpc_config["subnet_layers"], []) :
-      y["name"]
-    ],
-    [for y in coalesce(var.vpc_config["subnet_layers"], []) :
-      y
-    ]
-  )
+  for_each = {
+    for layer in var.vpc_config.subnet_layers : layer.name => layer
+    if layer.create
+  }
 
   vpc_id = try(
     aws_vpc.vpc["vpc"].id,
@@ -334,6 +356,44 @@ resource "aws_network_acl" "nacl" {
   }
 }
 
+# The layer NACL is deliberately neutral; workload restrictions belong in Security Groups or explicit network_acl_rules.
+# trivy:ignore:AWS-0102
+resource "aws_network_acl_rule" "default_ipv6_egress" {
+  for_each = {
+    for name, layer in zipmap(
+      [for layer in var.vpc_config.subnet_layers : layer.name],
+      var.vpc_config.subnet_layers
+    ) : name => layer
+    if layer.create && local.ipv6_enabled && layer.ipv6_enabled
+  }
+
+  network_acl_id  = aws_network_acl.nacl[each.key].id
+  egress          = true
+  protocol        = "-1"
+  rule_action     = "allow"
+  rule_number     = 201
+  ipv6_cidr_block = "::/0"
+}
+
+# The layer NACL is deliberately neutral; workload restrictions belong in Security Groups or explicit network_acl_rules.
+# trivy:ignore:AWS-0102
+resource "aws_network_acl_rule" "default_ipv6_ingress" {
+  for_each = {
+    for name, layer in zipmap(
+      [for layer in var.vpc_config.subnet_layers : layer.name],
+      var.vpc_config.subnet_layers
+    ) : name => layer
+    if layer.create && local.ipv6_enabled && layer.ipv6_enabled
+  }
+
+  network_acl_id  = aws_network_acl.nacl[each.key].id
+  egress          = false
+  protocol        = "-1"
+  rule_action     = "allow"
+  rule_number     = 201
+  ipv6_cidr_block = "::/0"
+}
+
 
 
 
@@ -352,7 +412,7 @@ resource "aws_network_acl_association" "nacl_association" {
         ]
       )
     ) :
-    k => v
+    k => v if v["create"]
   }
 
 
@@ -369,7 +429,7 @@ resource "aws_network_acl_rule" "nacl_rules" {
         for k, v in coalesce(var.vpc_config["subnet_layers"], []) :
         [
           for x, y in coalesce(v["network_acl_rules"], []) :
-          format("%s-%s", v["name"], x)
+          format("%s-%s", v["name"], x) if v["create"]
         ]
       ]
     ),
@@ -378,7 +438,7 @@ resource "aws_network_acl_rule" "nacl_rules" {
         for k, v in coalesce(var.vpc_config["subnet_layers"], []) :
         [
           for x, y in coalesce(v["network_acl_rules"], []) :
-          merge({ "name" : v["name"] }, { "nacl_tf_id" : format("%s-%s", v["name"], x) }, y)
+          merge({ "name" : v["name"] }, { "nacl_tf_id" : format("%s-%s", v["name"], x) }, y) if v["create"]
         ]
       ]
     )

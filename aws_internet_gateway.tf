@@ -14,6 +14,7 @@ resource "aws_internet_gateway" "igw" {
   vpc_id = try(each.value["id"], each.value["vpc_id"])
 
   tags = merge(
+    local.common_tags,
     tomap(
       {
         "Name" = upper(
@@ -36,8 +37,7 @@ resource "aws_internet_gateway" "igw" {
         )
         "opsteam:ParentObjectType" = "VPC"
       }
-    ),
-    local.common_tags
+    )
   )
 }
 
@@ -58,12 +58,12 @@ resource "aws_route" "r_to_igw" {
         ]
       )
     ) :
-    k => "public_subnet" if v["scope"] == "public"
+    k => "public_subnet" if v["create"] && v["scope"] == "public"
   }
 
   route_table_id             = aws_route_table.rt[each.key].id
   destination_prefix_list_id = aws_ec2_managed_prefix_list.managed_prefixlist_internet["vpc"].id
-  gateway_id                 = aws_internet_gateway.igw["vpc"].id
+  gateway_id                 = local.internet_gateway_id
 
 }
 

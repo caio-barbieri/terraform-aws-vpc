@@ -51,13 +51,13 @@ data "aws_route_tables" "rts_to_gw-endpoints" {
           ),
           x,
           y["service_type"]
-        ) if try(y["route_tables_filter"], null) != null
+        ) if try(y["route_tables_filter"], null) != null && try(y["route_table_ids"], null) == null
       ]
     ),
     flatten(
       [
         for y in coalesce(var.vpc_config["vpc_endpoints"], {}) :
-        y if try(y["route_tables_filter"], null) != null
+        y if try(y["route_tables_filter"], null) != null && try(y["route_table_ids"], null) == null
       ]
     )
   )
@@ -107,16 +107,21 @@ resource "aws_vpc_endpoint" "vpc_endpoint_gw" {
     var.vpc_config["vpc"]["vpc_id"]
   )
 
-  service_name      = data.aws_vpc_endpoint_service.endpoint[each.key].service_name
-  policy            = each.value["policy"]
-  route_table_ids   = data.aws_route_tables.rts_to_gw-endpoints[each.key].ids
+  service_name = data.aws_vpc_endpoint_service.endpoint[each.key].service_name
+  auto_accept  = each.value["auto_accept"]
+  policy       = each.value["policy"]
+  route_table_ids = coalesce(
+    each.value["route_table_ids"],
+    try(data.aws_route_tables.rts_to_gw-endpoints[each.key].ids, null),
+    toset(values(aws_route_table.rt)[*].id)
+  )
   vpc_endpoint_type = title(each.value["service_type"])
   tags = merge(
+    local.common_tags,
+    each.value["tags"],
     {
       "Name" = format("vpce|%s", each.key)
-    },
-    local.common_tags,
-    each.value["tags"]
+    }
   )
 
   depends_on = [
@@ -147,13 +152,13 @@ resource "aws_security_group" "sg-vpce-interface" {
           ),
           x,
           y["service_type"]
-        ) if title(y["service_type"]) == "Interface" || y["service_type"] == "endpointservice"
+        ) if title(y["service_type"]) == "Interface" || lower(y["service_type"]) == "endpointservice"
       ]
     ),
     flatten(
       [
         for y in coalesce(var.vpc_config["vpc_endpoints"], {}) :
-        y if title(y["service_type"]) == "Interface" || y["service_type"] == "endpointservice"
+        y if title(y["service_type"]) == "Interface" || lower(y["service_type"]) == "endpointservice"
       ]
     )
   )
@@ -172,28 +177,25 @@ resource "aws_security_group" "sg-vpce-interface" {
       from_port = ingress.value["from_port"]
       to_port   = ingress.value["to_port"]
       protocol  = ingress.value["protocol"]
-      cidr_blocks = ingress.value["security_groups"] != [] ? toset(
+      cidr_blocks = length(coalesce(ingress.value["security_groups"], toset([]))) == 0 ? toset(
         [
-          try(
-            aws_vpc.vpc["vpc"].cidr_block,
-            var.vpc_config["vpc"]["cidr_block"]
-          )
+          local.vpc_context.cidr_block
         ]
       ) : null
+      ipv6_cidr_blocks = length(coalesce(ingress.value["security_groups"], toset([]))) == 0 && local.ipv6_enabled ? toset([
+        local.vpc_ipv6_cidr_block
+      ]) : null
 
-      security_groups = try(
-        ingress.value["security_groups"],
-        null
-      )
+      security_groups = length(coalesce(ingress.value["security_groups"], toset([]))) > 0 ? ingress.value["security_groups"] : null
 
     }
   }
 
   tags = merge(
+    local.common_tags,
     {
       "Name" = format("vpce-sg--%s", each.key)
-    },
-    local.common_tags
+    }
   )
 
 }
@@ -213,13 +215,13 @@ data "aws_subnets" "subnets-vpce-interface" {
           ),
           x,
           y["service_type"]
-        ) if title(y["service_type"]) == "Interface" || y["service_type"] == "endpointservice"
+        ) if(title(y["service_type"]) == "Interface" || lower(y["service_type"]) == "endpointservice") && try(y["subnet_ids"], null) == null
       ]
     ),
     flatten(
       [
         for y in coalesce(var.vpc_config["vpc_endpoints"], {}) :
-        y if title(y["service_type"]) == "Interface" || y["service_type"] == "endpointservice"
+        y if(title(y["service_type"]) == "Interface" || lower(y["service_type"]) == "endpointservice") && try(y["subnet_ids"], null) == null
       ]
     )
   )
@@ -277,13 +279,13 @@ resource "aws_vpc_endpoint" "vpc_endpoint_interface" {
           ),
           x,
           y["service_type"]
-        ) if title(y["service_type"]) == "Interface" || y["service_type"] == "endpointservice"
+        ) if title(y["service_type"]) == "Interface" || lower(y["service_type"]) == "endpointservice"
       ]
     ),
     flatten(
       [
         for x, y in coalesce(var.vpc_config["vpc_endpoints"], {}) :
-        merge(y, { "service_type" : "Interface", "service_name" : x }) if title(y["service_type"]) == "Interface" || y["service_type"] == "endpointservice"
+        merge(y, { "service_type" : "Interface", "service_name" : x }) if title(y["service_type"]) == "Interface" || lower(y["service_type"]) == "endpointservice"
       ]
     )
   )
@@ -300,26 +302,30 @@ resource "aws_vpc_endpoint" "vpc_endpoint_interface" {
 
 
   dynamic "dns_options" {
-    for_each = each.value["dns_options"]
+    for_each = [each.value["dns_options"]]
     content {
-      dns_record_ip_type = dns_options.value
+      dns_record_ip_type = dns_options.value["dns_record_ip_type"]
     }
   }
 
+  auto_accept         = each.value["auto_accept"]
   policy              = each.value["policy"]
   private_dns_enabled = startswith(each.value["service_name"], "com.amazonaws.vpce") ? each.value["endpoint_service_private_dns_enabled"] : each.value["private_dns_enabled"]
   ip_address_type     = each.value["ip_address_type"]
 
   security_group_ids = toset([aws_security_group.sg-vpce-interface[each.key].id])
-  subnet_ids         = data.aws_subnets.subnets-vpce-interface[each.key].ids
-  vpc_endpoint_type  = title(each.value["service_type"])
+  subnet_ids = coalesce(
+    each.value["subnet_ids"],
+    try(data.aws_subnets.subnets-vpce-interface[each.key].ids, null)
+  )
+  vpc_endpoint_type = title(each.value["service_type"])
 
   tags = merge(
+    local.common_tags,
+    each.value["tags"],
     {
       "Name" = format("vpce-sg--%s", each.key)
-    },
-    local.common_tags,
-    each.value["tags"]
+    }
   )
 
   depends_on = [

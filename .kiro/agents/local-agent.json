@@ -1,16 +1,13 @@
 {
-  "$schema": "https://raw.githubusercontent.com/aws/amazon-q-developer-cli/refs/heads/main/schemas/agent-v1.json",
-  "name": "local-agent",
-  "description": "Local agent for workspace MCPs",
-  "prompt": null,
+  "$schema": "https://raw.githubusercontent.com/aws/amazon-q-developer-cli/15cc8f3cd18c4272925ce1c7053268eedff1ea0a/schemas/agent-v1.json",
+  "name": "terraform-aws-vpc",
+  "description": "Repository-scoped agent for safely maintaining the Terraform AWS VPC module",
+  "prompt": "file://../../AGENTS.md",
   "mcpServers": {
     "awslabs.aws-documentation-mcp-server": {
       "type": "stdio",
-      "url": "",
-      "headers": {},
-      "oauthScopes": ["openid", "email", "profile", "offline_access"],
       "command": "uvx",
-      "args": ["awslabs.aws-documentation-mcp-server@latest"],
+      "args": ["awslabs.aws-documentation-mcp-server@1.1.30"],
       "env": {
         "AWS_DOCUMENTATION_PARTITION": "aws",
         "FASTMCP_LOG_LEVEL": "ERROR"
@@ -19,16 +16,15 @@
       "disabled": false
     },
     "aws-knowledge-mcp-server": {
+      "type": "http",
       "url": "https://knowledge-mcp.global.api.aws",
-      "type": "http"
+      "command": "",
+      "disabled": false
     },
     "awslabs.terraform-mcp-server": {
       "type": "stdio",
-      "url": "",
-      "headers": {},
-      "oauthScopes": ["openid", "email", "profile", "offline_access"],
       "command": "uvx",
-      "args": ["awslabs.terraform-mcp-server@latest"],
+      "args": ["awslabs.terraform-mcp-server@1.0.18"],
       "env": {
         "FASTMCP_LOG_LEVEL": "ERROR"
       },
@@ -36,24 +32,37 @@
       "disabled": false
     }
   },
-  "tools": ["*"],
-  "toolAliases": {},
-  "allowedTools": ["*"],
-  "resources": [],
-  "hooks": {},
+  "tools": [
+    "fs_read",
+    "fs_write",
+    "execute_bash",
+    "thinking",
+    "todo_list",
+    "@awslabs.aws-documentation-mcp-server",
+    "@aws-knowledge-mcp-server",
+    "@awslabs.terraform-mcp-server"
+  ],
+  "allowedTools": [
+    "fs_read",
+    "thinking",
+    "todo_list",
+    "@awslabs.aws-documentation-mcp-server",
+    "@aws-knowledge-mcp-server"
+  ],
+  "resources": [
+    "file://../../README.md",
+    "file://../../CONTRIBUTING.md",
+    "file://../../SECURITY.md",
+    "file://../../docs/*.md",
+    "file://../../variables.tf",
+    "file://../../outputs.tf",
+    "file://../../testing/*.tftest.hcl"
+  ],
   "toolsSettings": {
-    "use_aws": {
-      "alwaysAllow": [
-        {
-          "preset": "readOnly"
-        }
-      ]
-    },
     "execute_bash": {
-      "alwaysAllow": [
-        {
-          "preset": "readOnly"
-        }
+      "autoAllowReadonly": true,
+      "deniedCommands": [
+        ".*terraform.*(apply|destroy|import|taint|untaint|force-unlock).*"
       ]
     }
   },
