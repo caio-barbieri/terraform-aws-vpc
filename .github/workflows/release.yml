@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release Please
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Ensure the legacy v1.0.0 baseline exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          baseline_tag="v1.0.0"
+          legacy_sha="$(jq -r '."bootstrap-sha" // empty' release-please-config.json)"
+
+          if [[ ! "${legacy_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "release-please-config.json must contain a full bootstrap-sha." >&2
+            exit 1
+          fi
+
+          git fetch --force --tags origin
+
+          if git rev-parse --verify --quiet "refs/tags/${baseline_tag}" >/dev/null; then
+            actual_sha="$(git rev-list -n 1 "${baseline_tag}")"
+            if [[ "${actual_sha}" != "${legacy_sha}" ]]; then
+              echo "${baseline_tag} points to ${actual_sha}, expected ${legacy_sha}." >&2
+              echo "Refusing to move an existing release tag." >&2
+              exit 1
+            fi
+
+            if ! gh release view "${baseline_tag}" >/dev/null 2>&1; then
+              gh release create "${baseline_tag}" \
+                --verify-tag \
+                --title "${baseline_tag}" \
+                --notes "Legacy compatibility baseline. Pin this tag before adopting v2."
+            fi
+          else
+            if ! git cat-file -e "${legacy_sha}^{commit}" 2>/dev/null; then
+              git fetch --no-tags origin "${legacy_sha}"
+            fi
+
+            gh release create "${baseline_tag}" \
+              --target "${legacy_sha}" \
+              --title "${baseline_tag}" \
+              --notes "Legacy compatibility baseline. Pin this tag before adopting v2."
+          fi
+
+      - name: Open or update the release PR
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          target-branch: ${{ github.event.repository.default_branch }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}

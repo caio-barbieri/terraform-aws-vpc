@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/v17.11.1/schemas/config.json",
+  "bootstrap-sha": "e05cbfd5ce65c091ddee2ef1d9c85f4453d9e103",
+  "draft-pull-request": false,
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+  "pull-request-title-pattern": "chore(release): release ${version}",
+  "release-type": "terraform-module",
+  "packages": {
+    ".": {
+      "component": "terraform-aws-vpc"
+    }
+  }
+}
