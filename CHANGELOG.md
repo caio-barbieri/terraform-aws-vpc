@@ -16,7 +16,6 @@ Todas as mudanças relevantes deste projeto serão registradas neste arquivo. O 
 
 ### Bug Fixes
 
-* **nat_instance:** propagate key_name, iam_instance_profile and instance_tags ([95d616d](https://github.com/opsteamhub/terraform-aws-vpc/commit/95d616d9eed610b2b4f9667ed780cf9d41dcadd4))
 * **nat_instance:** propagate key_name, iam_instance_profile and instance_tags ([204b5e9](https://github.com/opsteamhub/terraform-aws-vpc/commit/204b5e9dedbe29647ffbf87c2a0e04ec232d7cd4))
 * **nat-instance:** preserve access inputs during main merge ([11cf9f1](https://github.com/opsteamhub/terraform-aws-vpc/commit/11cf9f1192a37f6d3d6946893cea023ee4c15dd5))
 * **vpc:** harden IPAM IPv6 and peering paths ([3d6c91f](https://github.com/opsteamhub/terraform-aws-vpc/commit/3d6c91f49f9b08290ddba375034baf5a247ba8a4))
