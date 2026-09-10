@@ -294,6 +294,11 @@ run "creates_a_hardened_nat_instance_from_a_public_subnet" {
   }
 
   assert {
+    condition     = one(one(values(aws_launch_template.natinstance_lt)).iam_instance_profile).name == "nat-instance-ssm"
+    error_message = "The current iam_instance_profile_name input must remain attached to the NAT instance."
+  }
+
+  assert {
     condition     = length(aws_route.r_natinstance) == 1
     error_message = "A private subnet marked for NAT instance egress must receive a route."
   }
@@ -302,6 +307,105 @@ run "creates_a_hardened_nat_instance_from_a_public_subnet" {
     condition     = length(aws_autoscaling_group.natinstance_asg) == 1 && length(output.nat_instance_network_interface_ids) == 1
     error_message = "A NAT instance candidate must be maintained by an Auto Scaling Group and expose its ENI."
   }
+}
+
+run "propagates_legacy_nat_instance_access_and_custom_tags" {
+  command = apply
+
+  variables {
+    vpc_config = {
+      vpc = {
+        cidr_block = "10.40.0.0/16"
+      }
+
+      nat_instance = {
+        create               = true
+        ami_id               = "ami-0123456789abcdef0"
+        az_widerange         = 1
+        key_name             = "nat-instance-admin"
+        iam_instance_profile = "nat-instance-legacy"
+        instance_tags = {
+          Name       = "caller-name"
+          PatchGroup = "network"
+        }
+      }
+
+      subnet_layers = [
+        {
+          name         = "public"
+          scope        = "public"
+          az_widerange = 1
+          cidr_block   = ["10.40.0.0/24"]
+        }
+      ]
+    }
+  }
+
+  assert {
+    condition = (
+      one(values(aws_launch_template.natinstance_lt)).key_name == "nat-instance-admin" &&
+      one(one(values(aws_launch_template.natinstance_lt)).iam_instance_profile).name == "nat-instance-legacy" &&
+      one(one(values(aws_launch_template.natinstance_lt)).tag_specifications).tags["PatchGroup"] == "network" &&
+      one(one(values(aws_launch_template.natinstance_lt)).tag_specifications).tags["Name"] == "NATINSTANCE-PUBLIC-USE1-AZ1"
+    )
+    error_message = "Legacy NAT instance access inputs and custom tags must reach the launch template without overriding its deterministic Name."
+  }
+}
+
+run "accepts_matching_nat_instance_profile_aliases_once" {
+  command = apply
+
+  variables {
+    vpc_config = {
+      vpc = {
+        cidr_block = "10.42.0.0/16"
+      }
+
+      nat_instance = {
+        create                    = true
+        ami_id                    = "ami-0123456789abcdef0"
+        az_widerange              = 1
+        iam_instance_profile      = "nat-instance-shared"
+        iam_instance_profile_name = "nat-instance-shared"
+      }
+
+      subnet_layers = [
+        {
+          name         = "public"
+          scope        = "public"
+          az_widerange = 1
+          cidr_block   = ["10.42.0.0/24"]
+        }
+      ]
+    }
+  }
+
+  assert {
+    condition = (
+      length(one(values(aws_launch_template.natinstance_lt)).iam_instance_profile) == 1 &&
+      one(one(values(aws_launch_template.natinstance_lt)).iam_instance_profile).name == "nat-instance-shared"
+    )
+    error_message = "Matching NAT instance profile aliases must emit exactly one IAM instance profile block."
+  }
+}
+
+run "rejects_conflicting_nat_instance_profile_aliases" {
+  command = plan
+
+  variables {
+    vpc_config = {
+      vpc = {
+        cidr_block = "10.41.0.0/16"
+      }
+
+      nat_instance = {
+        iam_instance_profile      = "nat-instance-legacy"
+        iam_instance_profile_name = "nat-instance-current"
+      }
+    }
+  }
+
+  expect_failures = [var.vpc_config]
 }
 
 run "creates_a_nat_gateway_from_a_public_subnet" {

@@ -28,6 +28,11 @@ locals {
     local.map_of_subnets[subnet_key].az_id => subnet_key
   }
 
+  nat_instance_iam_instance_profile_name = (
+    var.vpc_config.nat_instance.iam_instance_profile_name != null ?
+    var.vpc_config.nat_instance.iam_instance_profile_name :
+    var.vpc_config.nat_instance.iam_instance_profile
+  )
 }
 
 
@@ -136,11 +141,12 @@ resource "aws_launch_template" "natinstance_lt" {
   name_prefix   = format("lt-natinstance-%s", each.key)
   image_id      = var.vpc_config["nat_instance"]["ami_id"]
   instance_type = var.vpc_config["nat_instance"]["instance_type"]
+  key_name      = var.vpc_config.nat_instance.key_name
 
   tags = local.common_tags
 
   dynamic "iam_instance_profile" {
-    for_each = var.vpc_config.nat_instance.iam_instance_profile_name != null ? [var.vpc_config.nat_instance.iam_instance_profile_name] : []
+    for_each = local.nat_instance_iam_instance_profile_name != null ? [local.nat_instance_iam_instance_profile_name] : []
     content {
       name = iam_instance_profile.value
     }

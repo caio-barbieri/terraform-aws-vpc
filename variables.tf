@@ -122,9 +122,11 @@ variable "vpc_config" {
             az_ids                    = optional(set(string))         # List of Availability Zone IDs to use for the NAT instance
             exclude_az_ids            = optional(set(string))         # List of Availability Zone IDs to exclude from use for the NAT instance
             health_check_grace_period = optional(number, 300)         # Seconds before EC2 health checks can replace the NAT instance
+            iam_instance_profile      = optional(string)              # Compatibility alias for iam_instance_profile_name
             iam_instance_profile_name = optional(string)              # IAM instance profile name for the NAT instance
             instance_tags             = optional(map(string), {})     # Additional tags for NAT EC2 instances
             instance_type             = optional(string, "t3.medium") # The instance type of the NAT instance
+            key_name                  = optional(string)              # SSH key pair name to associate with the NAT instance
           }
         ),
         {
@@ -460,6 +462,15 @@ variable "vpc_config" {
       can(regex("^ami-[0-9a-f]+$", var.vpc_config.nat_instance.ami_id))
     )
     error_message = "nat_instance.ami_id must be a valid AMI ID when nat_instance.create is true."
+  }
+
+  validation {
+    condition = (
+      var.vpc_config.nat_instance.iam_instance_profile == null ||
+      var.vpc_config.nat_instance.iam_instance_profile_name == null ||
+      var.vpc_config.nat_instance.iam_instance_profile == var.vpc_config.nat_instance.iam_instance_profile_name
+    )
+    error_message = "nat_instance.iam_instance_profile and nat_instance.iam_instance_profile_name must match when both are set."
   }
 
   validation {

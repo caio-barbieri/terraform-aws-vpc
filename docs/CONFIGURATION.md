@@ -109,7 +109,7 @@ O modo gerado é exclusivo com CIDR, IPAM e pool explícitos.
 
 NAT Gateway cria EIP e gateway por AZ selecionada. Uma subnet privada prefere o NAT Gateway da mesma AZ e usa o primeiro candidato somente como fallback.
 
-NAT Instance exige `ami_id` válido. Também aceita `instance_type` (`t3.medium`), `iam_instance_profile_name`, `health_check_grace_period` (`300`) e `instance_tags`. A AMI, IP forwarding, patching e hardening do sistema operacional pertencem ao consumidor.
+NAT Instance exige `ami_id` válido. Também aceita `instance_type` (`t3.medium`), `key_name`, `iam_instance_profile_name`, `health_check_grace_period` (`300`) e `instance_tags`. `iam_instance_profile` é um alias de compatibilidade para `iam_instance_profile_name`; se ambos forem informados, precisam ter o mesmo valor. A AMI, IP forwarding, patching e hardening do sistema operacional pertencem ao consumidor.
 
 ## Flow Logs
 

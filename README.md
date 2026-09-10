@@ -125,6 +125,7 @@ nat_instance = {
   ami_id                    = "ami-0123456789abcdef0"
   az_widerange              = 1
   instance_type             = "t3.medium"
+  key_name                  = "nat-instance-admin"
   iam_instance_profile_name = "nat-instance-ssm"
   instance_tags = {
     PatchGroup = "network"
@@ -133,6 +134,7 @@ nat_instance = {
 ```
 
 O launch template exige IMDSv2. O Security Group da NAT Instance aceita entrada somente do CIDR da VPC; a saída permanece aberta porque esse é o objetivo do recurso.
+`iam_instance_profile` permanece aceito como alias de compatibilidade para `iam_instance_profile_name`; quando ambos são informados, os valores devem ser iguais.
 
 Quando há NAT Instances em múltiplas AZs, cada subnet privada prefere a ENI NAT da mesma AZ. Cada instância é mantida por um Auto Scaling Group com health check EC2. Isso fornece isolamento e recuperação por AZ, mas não altera automaticamente rotas para outra AZ durante uma falha regional da NAT Instance.
 
